@@ -1,0 +1,23 @@
+# dependencies & build output
+node_modules/
+dist/
+cdk.out/
+*.js.map
+*.tsbuildinfo
+
+# secrets & local env — never commit
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+*.p12
+*.pfx
+credentials
+.aws/
+
+# local tooling state
+.claude/settings.local.json
+
+# OS noise
+.DS_Store
