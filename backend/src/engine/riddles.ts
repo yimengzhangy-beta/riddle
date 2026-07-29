@@ -1,8 +1,11 @@
+import { entitled, meter, requireEntitled } from '../billing';
 import { today } from '../db/client';
 import * as daily from '../db/daily';
 import * as riddlesDb from '../db/riddles';
 import * as usersDb from '../db/users';
 import { ModelOutputError, judgeGuess } from '../llm/client';
+import type { GuessResolution } from '../log';
+import { logError, logGuessResolved } from '../log';
 import { judgeSystemPrompt, judgeUserMessage, retryNudge } from '../prompts';
 import type { Attempt, Difficulty, JudgedGuess, Profile, PublicRiddle, Riddle } from '../types';
 import { MAX_HINTS } from '../types';
@@ -48,6 +51,15 @@ export async function nextRiddle(args: {
   player: Player;
   difficulty: Difficulty;
 }): Promise<NextRiddleResult> {
+  // Gated before the first read, so a request that is not allowed costs nothing.
+  await requireEntitled(args.player.userId, 'serve_riddle');
+  if (args.difficulty === 'hard') {
+    // Hard riddles are a paid capability rather than a quota. The Free plan is
+    // published with an allowlist that omits `serve_hard_riddle`, and the paid
+    // plans grant everything — so this denies on Free and passes on Pro above.
+    await requireEntitled(args.player.userId, 'serve_hard_riddle');
+  }
+
   const [bank, attempts] = await Promise.all([
     riddlesDb.listByDifficulty(args.difficulty),
     usersDb.listAttempts(args.player.userId),
@@ -81,6 +93,13 @@ export async function nextRiddle(args: {
   await usersDb.putAttempt(attempt);
   await riddlesDb.incrementServed(riddle.riddleId);
   await daily.bumpQuietly({ riddlesServed: 1 });
+
+  // Metered after the serve is durable — billing for a riddle the player never
+  // received would be worse than missing one that they did.
+  await meter(args.player.userId, 'serve_riddle');
+  if (riddle.difficulty === 'hard') {
+    await meter(args.player.userId, 'serve_hard_riddle');
+  }
 
   return {
     riddle: publicView(riddle, attempt),
@@ -130,6 +149,8 @@ export async function submitGuess(args: {
   riddleId: string;
   guess: string;
 }): Promise<GuessResult> {
+  await requireEntitled(args.player.userId, 'submit_guess');
+
   const { riddle, attempt } = await loadAttempt(args.player, args.riddleId);
 
   if (attempt.solved) {
@@ -142,10 +163,24 @@ export async function submitGuess(args: {
   const exactMatch = isExactMatch(args.guess, riddle.answer);
 
   let judged: JudgedGuess;
+  let resolution: GuessResolution = 'normalized';
+  let judgedByModel = false;
   if (exactMatch) {
     judged = { verdict: 'correct', reason: 'Exactly right.' };
+  } else if (!(await entitled(args.player.userId, 'judge_guess')).allow) {
+    // Claude judging is what the paid tiers sell: catching synonyms, typos and
+    // near-misses that a string comparison cannot. Without it the guess has
+    // already failed the exact match above, so it is simply not accepted — the
+    // same outcome the llm_unavailable path produces, reached deliberately.
+    resolution = 'judge_not_entitled';
+    judged = {
+      verdict: 'wrong',
+      reason: 'Not an exact match. Upgrade to have Claude judge near-misses.',
+    };
   } else {
     try {
+      resolution = 'llm_judged';
+      judgedByModel = true;
       judged = await judgeGuess({
         system: judgeSystemPrompt(),
         user: judgeUserMessage({
@@ -161,7 +196,15 @@ export async function submitGuess(args: {
       // The judge is the only thing that can turn a non-exact guess into a solve.
       // Rather than fail the request, fall back to the string comparison we already
       // did and tell the player their guess was not accepted.
-      console.error(`Judge unusable, falling back to exact match only: ${err.message}`);
+      resolution = 'llm_unavailable';
+      // The judgment was attempted but produced nothing usable, so it is not
+      // metered — the player should not be billed for a capability that failed.
+      judgedByModel = false;
+      logError({
+        where: 'engine.submitGuess',
+        name: 'ModelOutputError',
+        message: `judge unusable, falling back to exact match only: ${err.message}`,
+      });
       judged = {
         verdict: 'wrong',
         reason: 'That is not the answer.',
@@ -203,6 +246,24 @@ export async function submitGuess(args: {
     pointsAwarded,
   });
 
+  // Every guess counts against the plan's quota; the judgment is metered
+  // separately, and only when the model actually returned a verdict.
+  await meter(args.player.userId, 'submit_guess');
+  if (judgedByModel) {
+    await meter(args.player.userId, 'judge_guess');
+  }
+
+  // The counterpart to llm_call: it records the guesses that never reached the
+  // model, so the judged-vs-normalised ratio is one query rather than a join.
+  logGuessResolved({
+    riddleId: riddle.riddleId,
+    resolution,
+    verdict: judged.verdict,
+    solved,
+    guessNumber: nextAttempt.guesses.length,
+    hintsTaken: attempt.hintsTaken,
+  });
+
   return {
     riddleId: riddle.riddleId,
     verdict: judged.verdict,
@@ -229,6 +290,8 @@ export interface HintResult {
 }
 
 export async function takeHint(args: { player: Player; riddleId: string }): Promise<HintResult> {
+  await requireEntitled(args.player.userId, 'take_hint');
+
   const { riddle, attempt } = await loadAttempt(args.player, args.riddleId);
 
   if (attempt.solved) {
@@ -252,6 +315,8 @@ export async function takeHint(args: { player: Player; riddleId: string }): Prom
   await usersDb.putAttempt(nextAttempt);
   await usersDb.putProfile(nextProfile);
   await daily.bumpQuietly({ hintsTaken: 1 });
+
+  await meter(args.player.userId, 'take_hint');
 
   return {
     riddleId: riddle.riddleId,

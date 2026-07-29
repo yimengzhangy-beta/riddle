@@ -7,6 +7,7 @@ import { HttpJwtAuthorizer } from 'aws-cdk-lib/aws-apigatewayv2-authorizers';
 import { HttpLambdaIntegration } from 'aws-cdk-lib/aws-apigatewayv2-integrations';
 import * as iam from 'aws-cdk-lib/aws-iam';
 import * as lambda from 'aws-cdk-lib/aws-lambda';
+import * as logs from 'aws-cdk-lib/aws-logs';
 import * as secretsmanager from 'aws-cdk-lib/aws-secretsmanager';
 import { NodejsFunction } from 'aws-cdk-lib/aws-lambda-nodejs';
 
@@ -18,6 +19,39 @@ const ANTHROPIC_SECRET_NAME = 'cofounder/anthropic-api-key';
 
 /** Members of this Cognito group may call POST /admin/*. */
 const ADMIN_GROUP = 'admins';
+
+/**
+ * Fixed so the log group is `/aws/lambda/riddle-api` rather than a generated
+ * name that changes whenever the construct is replaced.
+ */
+const FUNCTION_NAME = 'riddle-api';
+
+/** 90 days, for both the Lambda audit log and the API Gateway access log. */
+const LOG_RETENTION = logs.RetentionDays.THREE_MONTHS;
+
+/**
+ * The AWS Monetization app these plans and metrics live under. The control
+ * plane is us-east-1 regardless of where this stack is deployed — that region
+ * is a property of the service, not of the app.
+ */
+const MONETIZATION_APP_ID = '0c07accf-9932-4c68-a048-7564bea6a505';
+const MONETIZATION_REGION = 'us-east-1';
+
+/**
+ * The endpoint these plans were created against. The SDK's built-in default is a
+ * different host and does not resolve, so this is required rather than optional.
+ */
+const MONETIZATION_ENDPOINT = 'https://us-east-1.monetization.aws.dev';
+
+/**
+ * Where the web app is served from — the origin a player's browser returns to
+ * after paying. This is the Amplify URL, not the API's: the Lambda cannot infer
+ * it from a request, because its own origin is API Gateway. Override at synth
+ * time once the frontend has a domain:
+ *
+ *   APP_BASE_URL=https://main.xxxx.amplifyapp.com npx cdk deploy
+ */
+const APP_BASE_URL = process.env.APP_BASE_URL ?? 'http://localhost:5173';
 
 export class AppStack extends cdk.Stack {
   constructor(scope: Construct, id: string, props?: cdk.StackProps) {
@@ -81,10 +115,21 @@ export class AppStack extends cdk.Stack {
       ANTHROPIC_SECRET_NAME
     );
 
+    // Owned by the stack rather than auto-created by Lambda, which is the only way
+    // to put a retention policy on it. Holds the structured audit events.
+    const handlerLogGroup = new logs.LogGroup(this, 'ApiHandlerLogGroup', {
+      logGroupName: `/aws/lambda/${FUNCTION_NAME}`,
+      retention: LOG_RETENTION,
+      removalPolicy: cdk.RemovalPolicy.DESTROY, // dev convenience; switch to RETAIN for production
+    });
+
     const apiHandler = new NodejsFunction(this, 'ApiHandler', {
+      functionName: FUNCTION_NAME,
+      logGroup: handlerLogGroup,
       entry: 'src/handler.ts',
       handler: 'handler',
-      runtime: lambda.Runtime.NODEJS_22_X,
+      // 24, not 22: @aws-monetization/sdk declares engines.node >= 24.
+      runtime: lambda.Runtime.NODEJS_24_X,
       memorySize: 1024,
       // A guess makes at most one Anthropic call; admin generation makes one call
       // for the whole batch. API Gateway caps the integration at 30s — the Lambda
@@ -98,6 +143,13 @@ export class AppStack extends cdk.Stack {
         USER_POOL_ID: userPool.userPoolId,
         USER_POOL_CLIENT_ID: userPoolClient.userPoolClientId,
         ADMIN_GROUP,
+        MONETIZATION_APP_ID,
+        MONETIZATION_REGION,
+        MONETIZATION_ENDPOINT,
+        // Set to 'false' to keep every route open while checking that metering
+        // works on its own. Any other value (or none) enforces entitlement.
+        MONETIZATION_ENFORCE: 'true',
+        APP_BASE_URL,
       },
       bundling: {
         // Ship the judge/generation prompt files as inlined strings.
@@ -118,6 +170,36 @@ export class AppStack extends cdk.Stack {
           'cognito-idp:AdminUpdateUserAttributes',
         ],
         resources: [userPool.userPoolArn],
+      })
+    );
+
+    // AWS Monetization runtime calls: entitlement gates, usage metering, the
+    // pricing page, and checkout.
+    //
+    // `resources: ['*']` is deliberate, not an oversight. These operations are
+    // not resource-scoped by the service in its current form: every attempt to
+    // narrow to the app — `app/<id>`, `app/<id>/*`, account-wide, or any other
+    // arn:aws:monetization:… pattern — is rejected with AccessDeniedException,
+    // while the same call under `*` succeeds. IAM's own policy simulator reports
+    // the app-scoped ARN as `allowed`, so the mismatch is in what the service
+    // authorises against, not in the policy document.
+    //
+    // Least privilege is kept where it still bites: the seven actions below are
+    // exactly the ones the app calls, so this role cannot create, publish or
+    // archive plans and metrics. Narrow `resources` to the app ARN once the
+    // service supports it.
+    apiHandler.addToRolePolicy(
+      new iam.PolicyStatement({
+        actions: [
+          'monetization:GetEntitlementDecision',
+          'monetization:PutEvent',
+          'monetization:PutAwsServiceEvent',
+          'monetization:ListPlans',
+          'monetization:CreateCheckoutSession',
+          'monetization:CancelSubscription',
+          'monetization:GetSubscription',
+        ],
+        resources: ['*'],
       })
     );
 
@@ -151,11 +233,20 @@ export class AppStack extends cdk.Stack {
 
     // Public — these are how you obtain a token in the first place.
     api.addRoutes({ path: '/health', methods: [apigwv2.HttpMethod.GET], integration, ...open });
+    // Public: the pricing page has to render before a visitor has an account.
+    api.addRoutes({ path: '/plans', methods: [apigwv2.HttpMethod.GET], integration, ...open });
     api.addRoutes({ path: '/signup', methods: [apigwv2.HttpMethod.POST], integration, ...open });
     api.addRoutes({ path: '/login', methods: [apigwv2.HttpMethod.POST], integration, ...open });
 
     // Authenticated.
     api.addRoutes({ path: '/me', methods: [apigwv2.HttpMethod.GET], integration });
+    api.addRoutes({ path: '/subscription', methods: [apigwv2.HttpMethod.GET], integration });
+    api.addRoutes({
+      path: '/subscription/summary',
+      methods: [apigwv2.HttpMethod.GET],
+      integration,
+    });
+    api.addRoutes({ path: '/subscribe', methods: [apigwv2.HttpMethod.POST], integration });
     api.addRoutes({ path: '/riddles/next', methods: [apigwv2.HttpMethod.GET], integration });
     api.addRoutes({ path: '/riddles/{id}/guess', methods: [apigwv2.HttpMethod.POST], integration });
     api.addRoutes({ path: '/riddles/{id}/hint', methods: [apigwv2.HttpMethod.POST], integration });
@@ -166,7 +257,148 @@ export class AppStack extends cdk.Stack {
     const stage = api.defaultStage!.node.defaultChild as apigwv2.CfnStage;
     stage.defaultRouteSettings = { throttlingRateLimit: 500, throttlingBurstLimit: 1000 };
 
+    // ------------------------------------------------------- access logging
+
+    /**
+     * Its own group, because the requests worth having here are the ones the
+     * Lambda never sees: a rejected JWT is a 401 from the authorizer, so it
+     * leaves no `request` event behind. `$context.requestId` is the same id the
+     * handler stamps on its events, so the two groups join on it.
+     *
+     * Fields are metadata only — no request body, no query string.
+     */
+    const accessLogGroup = new logs.LogGroup(this, 'ApiAccessLogGroup', {
+      logGroupName: `/aws/apigateway/${FUNCTION_NAME}-access`,
+      retention: LOG_RETENTION,
+      removalPolicy: cdk.RemovalPolicy.DESTROY, // dev convenience; switch to RETAIN for production
+    });
+
+    stage.accessLogSettings = {
+      destinationArn: accessLogGroup.logGroupArn,
+      format: JSON.stringify({
+        event: 'access',
+        requestId: '$context.requestId',
+        ts: '$context.requestTime',
+        method: '$context.httpMethod',
+        route: '$context.routeKey',
+        path: '$context.path',
+        status: '$context.status',
+        integrationStatus: '$context.integrationStatus',
+        integrationErrorMessage: '$context.integrationErrorMessage',
+        authorizerError: '$context.authorizer.error',
+        errorMessage: '$context.error.message',
+        // Present only once the authorizer has accepted the token.
+        userId: '$context.authorizer.claims.sub',
+        responseLatencyMs: '$context.responseLatency',
+        responseLength: '$context.responseLength',
+        sourceIp: '$context.identity.sourceIp',
+        userAgent: '$context.identity.userAgent',
+      }),
+    };
+
+    // ------------------------------------------------- saved Insights queries
+
+    const savedQuery = (id: string, name: string, logGroupNames: string[], queryString: string) =>
+      new logs.CfnQueryDefinition(this, id, {
+        name: `riddle/${name}`,
+        logGroupNames,
+        queryString,
+      });
+
+    const handlerLog = [handlerLogGroup.logGroupName];
+
+    // Everything one player did, newest first. Paste a `sub` into the filter.
+    savedQuery(
+      'QueryUserTrail',
+      'per-user activity trail',
+      handlerLog,
+      [
+        'fields @timestamp, event, method, route, riddleId, status, durationMs,',
+        '  resolution, verdict, solved, purpose, totalTokens, op, pk, sk, requestId',
+        '| filter userId = "PASTE_USER_SUB"',
+        '| sort @timestamp desc',
+        '| limit 200',
+      ].join('\n')
+    );
+
+    // Every event of one request in order: entry, model call, writes, response.
+    savedQuery(
+      'QueryRequestStory',
+      'single-request story',
+      [handlerLogGroup.logGroupName, accessLogGroup.logGroupName],
+      [
+        'fields @timestamp, @log, event, method, route, riddleId, userId, status,',
+        '  durationMs, purpose, model, inputTokens, outputTokens, totalTokens,',
+        '  op, pk, sk, counters.0, resolution, verdict, solved',
+        '| filter requestId = "PASTE_REQUEST_ID"',
+        '| sort @timestamp asc',
+        '| limit 100',
+      ].join('\n')
+    );
+
+    savedQuery(
+      'QueryLatencyByRoute',
+      'latency by route',
+      handlerLog,
+      [
+        'filter event = "response"',
+        '| stats count(*) as requests,',
+        '    avg(durationMs) as avgMs,',
+        '    pct(durationMs, 50) as p50Ms,',
+        '    pct(durationMs, 95) as p95Ms,',
+        '    max(durationMs) as maxMs',
+        '  by method, route',
+        '| sort avgMs desc',
+      ].join('\n')
+    );
+
+    // Most guesses never reach the model — the normalisation fast path settles
+    // them. This is the ratio, and so the shape of the Anthropic bill.
+    savedQuery(
+      'QueryGuessResolution',
+      'llm-judged vs normalized guesses',
+      handlerLog,
+      [
+        'filter event = "guess_resolved"',
+        '| stats count(*) as guesses by resolution, verdict',
+        '| sort guesses desc',
+      ].join('\n')
+    );
+
+    savedQuery(
+      'QueryTokenSpend',
+      'token spend by user',
+      handlerLog,
+      [
+        'filter event = "llm_call"',
+        '| stats count(*) as calls,',
+        '    sum(inputTokens) as inputTokens,',
+        '    sum(outputTokens) as outputTokens,',
+        '    sum(totalTokens) as totalTokens,',
+        '    avg(durationMs) as avgMs',
+        '  by userId, purpose',
+        '| sort totalTokens desc',
+      ].join('\n')
+    );
+
+    // The requests the handler never saw: rejected tokens, throttles, 5xx from
+    // the platform itself.
+    savedQuery(
+      'QueryRejectedAtEdge',
+      'rejected before the lambda (401/403/429)',
+      [accessLogGroup.logGroupName],
+      [
+        'fields @timestamp, requestId, method, path, status, errorMessage,',
+        '  authorizerError, integrationStatus, sourceIp, userAgent',
+        '| filter status = 401 or status = 403 or status = 429',
+        '| sort @timestamp desc',
+        '| limit 200',
+      ].join('\n')
+    );
+
     new cdk.CfnOutput(this, 'ApiUrl', { value: api.apiEndpoint });
+    new cdk.CfnOutput(this, 'HandlerLogGroup', { value: handlerLogGroup.logGroupName });
+    new cdk.CfnOutput(this, 'AccessLogGroup', { value: accessLogGroup.logGroupName });
     new cdk.CfnOutput(this, 'TableName', { value: table.tableName });
     new cdk.CfnOutput(this, 'UserPoolId', { value: userPool.userPoolId });
     new cdk.CfnOutput(this, 'UserPoolClientId', { value: userPoolClient.userPoolClientId });

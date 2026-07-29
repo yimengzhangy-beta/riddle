@@ -1,9 +1,13 @@
 import type { APIGatewayProxyEventV2WithJWTAuthorizer, APIGatewayProxyResultV2 } from 'aws-lambda';
-import { ForbiddenError, UnauthorizedError, playerOf, requireAdmin } from './auth';
+import { randomUUID } from 'crypto';
+import { ForbiddenError, UnauthorizedError, optionalUserId, playerOf, requireAdmin } from './auth';
+import { NotEntitledError, flushBilling } from './billing';
 import { ConflictError, NotFoundError, ValidationError } from './engine/riddles';
 import { ModelOutputError } from './llm/client';
+import { logError, logResponse, stackFrames, withRequest } from './log';
 import * as adminRoutes from './routes/admin';
 import * as authRoutes from './routes/auth';
+import * as billingRoutes from './routes/billing';
 import { BadRequest } from './routes/input';
 import * as meRoutes from './routes/me';
 import type { RouteResult } from './routes/result';
@@ -83,9 +87,26 @@ async function route(event: APIGatewayProxyEventV2WithJWTAuthorizer): Promise<Ro
     return authRoutes.postLogin(parseBody(event));
   }
 
+  // Public so the pricing page can render to a signed-out visitor.
+  if (method === 'GET' && match(segments, ['plans'])) {
+    return billingRoutes.getPlans();
+  }
+
   // --------------------------------------------------------- authenticated
   if (method === 'GET' && match(segments, ['me'])) {
     return meRoutes.getProfile(playerOf(event));
+  }
+
+  if (method === 'GET' && match(segments, ['subscription'])) {
+    return billingRoutes.getSubscription(playerOf(event));
+  }
+
+  if (method === 'GET' && match(segments, ['subscription', 'summary'])) {
+    return billingRoutes.getSubscriptionSummary(playerOf(event));
+  }
+
+  if (method === 'POST' && match(segments, ['subscribe'])) {
+    return billingRoutes.postSubscribe(playerOf(event), parseBody(event));
   }
 
   if (method === 'GET' && match(segments, ['riddles', 'next'])) {
@@ -109,32 +130,94 @@ async function route(event: APIGatewayProxyEventV2WithJWTAuthorizer): Promise<Ro
   return { status: 404, body: { error: `No route for ${method} ${event.rawPath}` } };
 }
 
+function errorResult(err: unknown): RouteResult {
+  if (err instanceof BadRequest || err instanceof ValidationError) {
+    return { status: 400, body: { error: err.message } };
+  }
+  if (err instanceof UnauthorizedError) {
+    return { status: 401, body: { error: err.message } };
+  }
+  if (err instanceof ForbiddenError) {
+    return { status: 403, body: { error: err.message } };
+  }
+  if (err instanceof NotFoundError) {
+    return { status: 404, body: { error: err.message } };
+  }
+  if (err instanceof ConflictError) {
+    return { status: 409, body: { error: err.message } };
+  }
+  if (err instanceof NotEntitledError) {
+    // Distinct from ForbiddenError: the caller is authenticated and allowed to
+    // be here, their plan just does not cover this. The reason is an enum from
+    // the billing backend, and the pointer tells the client where to go next.
+    return {
+      status: 403,
+      body: {
+        error: err.message,
+        reason: err.reason,
+        action: err.action,
+        upgradeUrl: '/pricing',
+      },
+    };
+  }
+  if (err instanceof ModelOutputError) {
+    return { status: 502, body: { error: `Model output could not be used: ${err.message}` } };
+  }
+
+  // Unexpected. The message is withheld from the audit log because an error
+  // raised deep in a client library can quote the input that caused it.
+  logError({
+    where: 'handler',
+    name: err instanceof Error ? err.name : typeof err,
+    message: 'unexpected error (message withheld — may contain request content)',
+    frames: stackFrames(err),
+  });
+  return { status: 500, body: { error: 'Internal server error' } };
+}
+
+/**
+ * Ids for the audit trail, read without throwing — an unauthenticated or
+ * unroutable request still gets a `request` event.
+ *
+ * `requestId` is API Gateway's, so these events join to the access log line for
+ * the same call. The route is the matched template (`POST /riddles/{id}/guess`),
+ * which keeps per-route stats from fragmenting across riddle ids.
+ */
+function auditContextOf(event: APIGatewayProxyEventV2WithJWTAuthorizer) {
+  const method = event.requestContext?.http?.method?.toUpperCase() ?? 'UNKNOWN';
+  const routeKey = event.requestContext?.routeKey;
+  const template =
+    routeKey && routeKey !== '$default' ? routeKey.replace(/^\S+\s+/, '') : (event.rawPath ?? '/');
+
+  const segments = pathSegments(event);
+  const fromPath = segments[0] === 'riddles' && segments[1] !== 'next' ? segments[1] : undefined;
+  const riddleId = event.pathParameters?.id ?? fromPath;
+
+  return {
+    requestId: event.requestContext?.requestId ?? randomUUID(),
+    userId: optionalUserId(event),
+    route: template,
+    method,
+    riddleId: riddleId ? decodeURIComponent(riddleId) : null,
+  };
+}
+
 export async function handler(
   event: APIGatewayProxyEventV2WithJWTAuthorizer
 ): Promise<APIGatewayProxyResultV2> {
-  try {
-    const result = await route(event);
+  return withRequest(auditContextOf(event), async () => {
+    let result: RouteResult;
+    try {
+      result = await route(event);
+    } catch (err) {
+      result = errorResult(err);
+    }
+
+    // The SDK batches usage events, and a Lambda is frozen the instant it
+    // returns — anything still buffered here would never be sent.
+    await flushBilling();
+
+    logResponse(result.status);
     return respond(result.status, result.body);
-  } catch (err) {
-    if (err instanceof BadRequest || err instanceof ValidationError) {
-      return respond(400, { error: err.message });
-    }
-    if (err instanceof UnauthorizedError) {
-      return respond(401, { error: err.message });
-    }
-    if (err instanceof ForbiddenError) {
-      return respond(403, { error: err.message });
-    }
-    if (err instanceof NotFoundError) {
-      return respond(404, { error: err.message });
-    }
-    if (err instanceof ConflictError) {
-      return respond(409, { error: err.message });
-    }
-    if (err instanceof ModelOutputError) {
-      return respond(502, { error: `Model output could not be used: ${err.message}` });
-    }
-    console.error(err);
-    return respond(500, { error: 'Internal server error' });
-  }
+  });
 }
