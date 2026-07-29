@@ -206,7 +206,7 @@ aws iam attach-role-policy --role-name GitHubActionsDeployRole \
     "Action": "sts:AssumeRoleWithWebIdentity",
     "Condition": {
       "StringEquals": { "token.actions.githubusercontent.com:aud": "sts.amazonaws.com" },
-      "StringLike": { "token.actions.githubusercontent.com:sub": "repo:yimengzhangy-beta/riddle:*" }
+      "StringLike": { "token.actions.githubusercontent.com:sub": "repo:yimengzhang-beta/riddle:*" }
     }
   }]
 }

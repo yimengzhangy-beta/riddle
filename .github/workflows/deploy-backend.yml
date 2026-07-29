@@ -1,11 +1,16 @@
 name: Deploy backend
 
 on:
-  push:
-    branches: [main]
-    paths:
-      - 'backend/**'
-      - '.github/workflows/deploy-backend.yml'
+  # Manual-only for now. The push trigger is commented out because the OIDC
+  # provider and GitHubActionsDeployRole do not exist in the account yet, so
+  # every push would fail at the role-assumption step. Do the one-time IAM
+  # setup in README §6, then uncomment the push block below.
+  workflow_dispatch:
+  # push:
+  #   branches: [main]
+  #   paths:
+  #     - 'backend/**'
+  #     - '.github/workflows/deploy-backend.yml'
 
 permissions:
   id-token: write   # required for OIDC
@@ -19,7 +24,7 @@ jobs:
 
       - uses: actions/setup-node@v4
         with:
-          node-version: 20
+          node-version: 24
           cache: npm
           cache-dependency-path: backend/package-lock.json
 
