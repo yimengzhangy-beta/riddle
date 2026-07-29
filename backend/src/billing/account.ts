@@ -1,6 +1,6 @@
 import { ResourceNotFoundException } from '@aws-monetization/sdk';
 import type { BillableAction } from '../log';
-import { logBillingError } from '../log';
+import { logBillingCall, logBillingError } from '../log';
 import { monetize } from './client';
 
 /**
@@ -114,7 +114,41 @@ export async function startCheckout(
   planId: string,
   urls: { returnUrl: string; refreshUrl: string }
 ) {
-  return monetize().createCheckoutSession(userId, planId, urls);
+  try {
+    const session = await monetize().createCheckoutSession(userId, planId, urls);
+    // The response shape IS the outcome, so record which one came back. A
+    // checkout that is issued and never paid looks identical to one that was
+    // never requested unless this line exists.
+    logBillingCall({
+      op: 'create_checkout',
+      planId,
+      serviceRequestId: requestIdOf(session),
+      outcome: session.checkoutUrl
+        ? 'checkout_issued'
+        : session.effectiveAt
+          ? 'scheduled'
+          : 'applied_immediately',
+    });
+    return session;
+  } catch (err) {
+    logBillingCall({
+      op: 'create_checkout',
+      planId,
+      outcome: 'failed',
+      error: err instanceof Error ? err.name : typeof err,
+    });
+    throw err;
+  }
+}
+
+/**
+ * The billing backend's request id, which the SDK hangs off `$metadata`. It is
+ * the only handle AWS can trace a call by, and it is not part of the typed
+ * response — hence the cast.
+ */
+function requestIdOf(response: unknown): string | null {
+  const meta = (response as { $metadata?: { requestId?: string } })?.$metadata;
+  return meta?.requestId ?? null;
 }
 
 export interface SubscriptionSummary {

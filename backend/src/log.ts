@@ -169,6 +169,28 @@ export function logMetered(fields: {
 }
 
 /**
+ * One control-plane billing call, recorded whether it succeeded or not.
+ *
+ * `serviceRequestId` is the billing backend's own request id, which is the only
+ * identifier AWS can trace a call by — our `requestId` is API Gateway's and
+ * means nothing to them. Without this, a checkout that creates a session the
+ * player never completes leaves nothing to escalate with.
+ *
+ * `outcome` records which of the three checkout shapes came back, so a payment
+ * that was never attempted is distinguishable from one that was declined.
+ */
+export function logBillingCall(fields: {
+  op: 'create_checkout' | 'get_subscription' | 'list_plans';
+  planId?: string;
+  serviceRequestId?: string | null;
+  outcome?: 'checkout_issued' | 'scheduled' | 'applied_immediately' | 'failed';
+  /** Error class name only — never the message, which can quote its input. */
+  error?: string;
+}): void {
+  emit('billing_call', fields);
+}
+
+/**
  * A billing call that failed for operational reasons — distinct from a DENY,
  * which is an answer rather than a failure. The class name only, for the same
  * reason `logError` withholds messages from SDK errors.
