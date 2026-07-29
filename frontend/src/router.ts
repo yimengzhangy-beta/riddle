@@ -19,11 +19,20 @@ export function navigate(path: string): void {
   window.dispatchEvent(new PopStateEvent('popstate'));
 }
 
+/**
+ * Static hosting often appends a trailing slash (Amplify 301s /pricing to
+ * /pricing/), so normalise it away — otherwise an exact path comparison misses
+ * and the router silently falls through to the default route.
+ */
+function normalise(pathname: string): string {
+  return pathname.replace(/\/+$/, '') || '/';
+}
+
 export function usePath(): string {
-  const [path, setPath] = useState(window.location.pathname);
+  const [path, setPath] = useState(() => normalise(window.location.pathname));
 
   useEffect(() => {
-    const onChange = () => setPath(window.location.pathname);
+    const onChange = () => setPath(normalise(window.location.pathname));
     window.addEventListener('popstate', onChange);
     return () => window.removeEventListener('popstate', onChange);
   }, []);
