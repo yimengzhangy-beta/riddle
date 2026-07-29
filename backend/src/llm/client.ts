@@ -1,4 +1,6 @@
 import Anthropic from '@anthropic-ai/sdk';
+import type { LlmPurpose } from '../log';
+import { logError, logLlmCall } from '../log';
 import type { GeneratedRiddle, JudgedGuess, Verdict } from '../types';
 import { MAX_HINTS, VERDICTS } from '../types';
 import { anthropicApiKey } from './secret';
@@ -52,8 +54,10 @@ function extractJson(raw: string, shape: 'object' | 'array'): unknown {
 
   try {
     return JSON.parse(text.slice(start, end + 1));
-  } catch (err) {
-    throw new ModelOutputError(`JSON.parse failed: ${(err as Error).message}`);
+  } catch {
+    // Deliberately not carrying the parser's own message: V8 quotes the offending
+    // text, which would put model output into the audit log and the HTTP error body.
+    throw new ModelOutputError('the reply was not parseable JSON');
   }
 }
 
@@ -103,19 +107,52 @@ function validateGenerated(value: unknown, wanted: number): GeneratedRiddle[] {
   });
 }
 
+/**
+ * The one place an Anthropic call is made, and so the one place the `llm_call`
+ * audit event is emitted — purpose, model, tokens and latency, never the prompt
+ * or the reply. Failures are logged too, so a spike in model errors is visible.
+ */
 async function complete(args: {
   system: string;
   messages: Anthropic.MessageParam[];
   maxTokens: number;
+  purpose: LlmPurpose;
+  attempt: number;
 }): Promise<string> {
   const anthropic = await client();
-  const message = await anthropic.messages.create({
+  const startedAt = Date.now();
+
+  let message: Anthropic.Message;
+  try {
+    message = await anthropic.messages.create({
+      model: MODEL,
+      max_tokens: args.maxTokens,
+      system: args.system,
+      // Thinking off keeps a guess inside API Gateway's 30s integration timeout.
+      thinking: { type: 'disabled' },
+      messages: args.messages,
+    });
+  } catch (err) {
+    logLlmCall({
+      purpose: args.purpose,
+      model: MODEL,
+      attempt: args.attempt,
+      durationMs: Date.now() - startedAt,
+      ok: false,
+      error: err instanceof Error ? err.name : typeof err,
+    });
+    throw err;
+  }
+
+  logLlmCall({
+    purpose: args.purpose,
     model: MODEL,
-    max_tokens: args.maxTokens,
-    system: args.system,
-    // Thinking off keeps a guess inside API Gateway's 30s integration timeout.
-    thinking: { type: 'disabled' },
-    messages: args.messages,
+    attempt: args.attempt,
+    durationMs: Date.now() - startedAt,
+    ok: true,
+    inputTokens: message.usage.input_tokens,
+    outputTokens: message.usage.output_tokens,
+    stopReason: message.stop_reason,
   });
 
   if (message.stop_reason === 'refusal') {
@@ -138,6 +175,7 @@ async function completeStrict<T>(args: {
   user: string;
   maxTokens: number;
   shape: 'object' | 'array';
+  purpose: LlmPurpose;
   validate: (value: unknown) => T;
   buildRetry: (problem: string) => string;
 }): Promise<T> {
@@ -147,13 +185,17 @@ async function completeStrict<T>(args: {
     system: args.system,
     messages,
     maxTokens: args.maxTokens,
+    purpose: args.purpose,
+    attempt: 1,
   });
 
   try {
     return args.validate(extractJson(first, args.shape));
   } catch (err) {
-    const problem = err instanceof ModelOutputError ? err.message : String(err);
-    console.warn(`Model output rejected, retrying once: ${problem}`);
+    // Every ModelOutputError message is a literal from this module, so it is safe
+    // to log; anything else is reduced to its class name.
+    const problem = err instanceof ModelOutputError ? err.message : 'validation failed';
+    logError({ where: 'llm.completeStrict', name: 'ModelOutputRejected', message: problem });
 
     // Mid-conversation assistant turns are fine; only a trailing prefill is not.
     const retry = await complete({
@@ -164,6 +206,8 @@ async function completeStrict<T>(args: {
         { role: 'user', content: args.buildRetry(problem) },
       ],
       maxTokens: args.maxTokens,
+      purpose: args.purpose,
+      attempt: 2,
     });
 
     return args.validate(extractJson(retry, args.shape));
@@ -181,6 +225,7 @@ export async function judgeGuess(args: {
     user: args.user,
     maxTokens: JUDGE_MAX_TOKENS,
     shape: 'object',
+    purpose: 'guess_judgment',
     validate: validateJudgement,
     buildRetry: args.buildRetry,
   });
@@ -198,6 +243,7 @@ export async function generateRiddles(args: {
     user: args.user,
     maxTokens: GENERATE_MAX_TOKENS,
     shape: 'array',
+    purpose: 'riddle_generation',
     validate: (value) => validateGenerated(value, args.count),
     buildRetry: args.buildRetry,
   });

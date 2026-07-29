@@ -1,4 +1,5 @@
 import { GetCommand, UpdateCommand } from '@aws-sdk/lib-dynamodb';
+import { logDbWrite, logError } from '../log';
 import type { DailyStats } from '../types';
 import { TABLE_NAME, doc, keys, today } from './client';
 
@@ -33,6 +34,12 @@ export async function bump(counts: Partial<Record<Counter, number>>, date = toda
       ExpressionAttributeValues: values,
     })
   );
+  logDbWrite({
+    op: 'Update',
+    pk: keys.daily(date),
+    sk: keys.META,
+    counters: entries.map(([counter]) => counter),
+  });
 }
 
 /**
@@ -47,7 +54,11 @@ export async function bumpQuietly(
   try {
     await bump(counts, date);
   } catch (err) {
-    console.error('daily stats bump failed', err);
+    logError({
+      where: 'db.daily.bump',
+      name: err instanceof Error ? err.name : typeof err,
+      message: 'daily stats bump failed',
+    });
   }
 }
 

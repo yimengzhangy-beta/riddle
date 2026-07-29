@@ -49,6 +49,18 @@ export function playerOf(event: APIGatewayProxyEventV2WithJWTAuthorizer): Player
 }
 
 /**
+ * The caller's `sub`, or null on a public or unauthenticated route. For the audit
+ * log, which opens its trail before routing and must not throw doing it.
+ */
+export function optionalUserId(event: APIGatewayProxyEventV2WithJWTAuthorizer): string | null {
+  try {
+    return stringClaim(claimsOf(event), 'sub');
+  } catch {
+    return null;
+  }
+}
+
+/**
  * Cognito serialises `cognito:groups` as a real array in the ID token, but API
  * Gateway can flatten a single-element list into a bracketed string on the way
  * through — accept both shapes.

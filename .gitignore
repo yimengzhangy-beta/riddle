@@ -21,3 +21,6 @@ credentials
 
 # OS noise
 .DS_Store
+
+# Ad-hoc scripts used while testing the monetization integration
+backend/_*.mjs

@@ -114,6 +114,34 @@ request.
 
 ---
 
+## Observability
+
+Every request writes a structured JSON audit trail. All events of one request share
+`requestId` — API Gateway's own — so the Lambda events and the access-log line join on it.
+
+| Log group | Contents | Retention |
+| --------- | -------- | --------- |
+| `/aws/lambda/riddle-api` | `request` → `llm_call` / `db_write` / `guess_resolved` → `response` | 90 days |
+| `/aws/apigateway/riddle-api-access` | one line per HTTP request, including the 401s the authorizer rejects before the Lambda runs | 90 days |
+
+**No user content is ever logged** — no guess text, no riddle answers. Ids, enum values,
+counts and timings only. See CLAUDE.md before adding an event.
+
+Most guesses are settled by normalisation and make no model call, so they emit **no**
+`llm_call` event; `guess_resolved.resolution` records which path was taken.
+
+Six queries ship with the stack — CloudWatch → **Logs Insights** → *Saved queries*,
+prefix `riddle/`:
+
+| Query | Answers |
+| ----- | ------- |
+| per-user activity trail | everything one player did (paste their `sub`) |
+| single-request story | every event of one request in order (paste a `requestId`) |
+| latency by route | avg / p50 / p95 / max per route |
+| llm-judged vs normalized guesses | how many guesses cost a Claude call |
+| token spend by user | input/output tokens by user and purpose |
+| rejected before the lambda | 401 / 403 / 429 from the access log |
+
 ## Layout
 
 ```

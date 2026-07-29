@@ -1,5 +1,6 @@
 import { GetCommand, PutCommand, QueryCommand, UpdateCommand } from '@aws-sdk/lib-dynamodb';
 import { randomUUID } from 'crypto';
+import { logDbWrite } from '../log';
 import type { Difficulty, GeneratedRiddle, Riddle } from '../types';
 import { DIFFICULTY_INDEX, TABLE_NAME, doc, keys } from './client';
 
@@ -52,10 +53,14 @@ export async function putGenerated(args: {
       })
     );
   } catch (err) {
-    if ((err as { name?: string }).name === 'ConditionalCheckFailedException') return null;
+    if ((err as { name?: string }).name === 'ConditionalCheckFailedException') {
+      logDbWrite({ op: 'Put', pk: keys.riddle(riddle.riddleId), sk: keys.META, written: false });
+      return null;
+    }
     throw err;
   }
 
+  logDbWrite({ op: 'Put', pk: keys.riddle(riddle.riddleId), sk: keys.META, written: true });
   return riddle;
 }
 
@@ -63,6 +68,7 @@ export async function putGenerated(args: {
 export async function putRiddle(riddle: Omit<Riddle, 'riddleId'>): Promise<Riddle> {
   const full: Riddle = { riddleId: randomUUID(), ...riddle };
   await doc.send(new PutCommand({ TableName: TABLE_NAME, Item: rowOf(full) }));
+  logDbWrite({ op: 'Put', pk: keys.riddle(full.riddleId), sk: keys.META });
   return full;
 }
 
@@ -98,6 +104,12 @@ export async function incrementServed(riddleId: string): Promise<void> {
       ExpressionAttributeValues: { ':zero': 0, ':one': 1 },
     })
   );
+  logDbWrite({
+    op: 'Update',
+    pk: keys.riddle(riddleId),
+    sk: keys.META,
+    counters: ['timesServed'],
+  });
 }
 
 export async function incrementSolved(riddleId: string): Promise<void> {
@@ -109,4 +121,10 @@ export async function incrementSolved(riddleId: string): Promise<void> {
       ExpressionAttributeValues: { ':zero': 0, ':one': 1 },
     })
   );
+  logDbWrite({
+    op: 'Update',
+    pk: keys.riddle(riddleId),
+    sk: keys.META,
+    counters: ['timesSolved'],
+  });
 }

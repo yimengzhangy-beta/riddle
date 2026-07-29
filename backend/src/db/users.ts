@@ -1,4 +1,5 @@
 import { GetCommand, PutCommand, QueryCommand } from '@aws-sdk/lib-dynamodb';
+import { logDbWrite } from '../log';
 import type { Attempt, Difficulty, Profile } from '../types';
 import { TABLE_NAME, doc, keys, today } from './client';
 
@@ -16,6 +17,7 @@ export async function putProfile(profile: Profile): Promise<void> {
       Item: { pk: keys.user(profile.userId), sk: keys.PROFILE, ...profile },
     })
   );
+  logDbWrite({ op: 'Put', pk: keys.user(profile.userId), sk: keys.PROFILE });
 }
 
 /**
@@ -79,6 +81,7 @@ export async function putAttempt(attempt: Attempt): Promise<void> {
       },
     })
   );
+  logDbWrite({ op: 'Put', pk: keys.user(attempt.userId), sk: keys.attempt(attempt.riddleId) });
 }
 
 /** Every riddle this user has already been served, for the unseen-riddle filter. */
