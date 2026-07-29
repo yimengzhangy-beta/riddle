@@ -5,7 +5,13 @@ applications:
       phases:
         preBuild:
           commands:
-            - npm ci
+            # `npm install`, not `npm ci`. Vite and Vitest pull in two different
+            # esbuild versions, and npm records the nested platform packages
+            # without their `optional` flag — so `npm ci` tries to install
+            # @esbuild/netbsd-arm64 on the Linux runner and dies with
+            # EBADPLATFORM. `npm install` resolves platform support at install
+            # time and skips the ones that do not apply.
+            - npm install --no-audit --no-fund
         build:
           commands:
             - npm run build
