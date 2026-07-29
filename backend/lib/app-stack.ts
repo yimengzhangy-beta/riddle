@@ -51,7 +51,14 @@ const MONETIZATION_ENDPOINT = 'https://us-east-1.monetization.aws.dev';
  *
  *   APP_BASE_URL=https://main.xxxx.amplifyapp.com npx cdk deploy
  */
-const APP_BASE_URL = process.env.APP_BASE_URL ?? 'http://localhost:5173';
+const APP_BASE_URL = process.env.APP_BASE_URL ?? 'https://main.d2v99bb7j5etb9.amplifyapp.com';
+
+/**
+ * Browser origins allowed to call this API. The deployed site and local dev —
+ * nothing else. Both the HTTP API's preflight and the handler's own
+ * Access-Control-Allow-Origin are driven from this one list.
+ */
+const ALLOWED_ORIGINS = [APP_BASE_URL, 'http://localhost:5173'];
 
 export class AppStack extends cdk.Stack {
   constructor(scope: Construct, id: string, props?: cdk.StackProps) {
@@ -150,6 +157,7 @@ export class AppStack extends cdk.Stack {
         // works on its own. Any other value (or none) enforces entitlement.
         MONETIZATION_ENFORCE: 'true',
         APP_BASE_URL,
+        ALLOWED_ORIGINS: ALLOWED_ORIGINS.join(','),
       },
       bundling: {
         // Ship the judge/generation prompt files as inlined strings.
@@ -223,7 +231,7 @@ export class AppStack extends cdk.Stack {
     const api = new apigwv2.HttpApi(this, 'Api', {
       defaultAuthorizer: authorizer, // every route below is protected unless it opts out
       corsPreflight: {
-        allowOrigins: ['*'], // tighten to your Amplify domain later
+        allowOrigins: ALLOWED_ORIGINS,
         allowMethods: [apigwv2.CorsHttpMethod.ANY],
         allowHeaders: ['Content-Type', 'Authorization'],
       },

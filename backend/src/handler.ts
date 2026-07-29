@@ -13,14 +13,40 @@ import * as meRoutes from './routes/me';
 import type { RouteResult } from './routes/result';
 import * as riddleRoutes from './routes/riddles';
 
-const CORS_HEADERS = {
-  'Access-Control-Allow-Origin': '*', // tighten to your Amplify domain later
-  'Access-Control-Allow-Headers': 'Content-Type,Authorization',
-  'Content-Type': 'application/json',
-};
+/**
+ * Origins allowed to call this API from a browser, set by the stack. The
+ * preflight allowlist lives on the HTTP API, but the actual response header is
+ * ours — leaving it as `*` here would keep the API open no matter what the
+ * gateway says, so the two have to agree.
+ */
+const ALLOWED_ORIGINS = (process.env.ALLOWED_ORIGINS ?? '')
+  .split(',')
+  .map((o) => o.trim())
+  .filter(Boolean);
 
-function respond(statusCode: number, body: unknown): APIGatewayProxyResultV2 {
-  return { statusCode, headers: CORS_HEADERS, body: JSON.stringify(body) };
+/**
+ * Echoes the caller's origin when it is on the list. An unknown origin gets the
+ * first allowed one, which the browser then rejects — a mismatch is the correct
+ * failure, and it keeps the header well-formed either way.
+ */
+function corsHeaders(origin: string | undefined): Record<string, string> {
+  const allowed =
+    origin && ALLOWED_ORIGINS.includes(origin) ? origin : (ALLOWED_ORIGINS[0] ?? '');
+  return {
+    'Access-Control-Allow-Origin': allowed,
+    'Access-Control-Allow-Headers': 'Content-Type,Authorization',
+    // The response varies by request origin, so caches must not share it.
+    Vary: 'Origin',
+    'Content-Type': 'application/json',
+  };
+}
+
+function respond(
+  statusCode: number,
+  body: unknown,
+  origin?: string
+): APIGatewayProxyResultV2 {
+  return { statusCode, headers: corsHeaders(origin), body: JSON.stringify(body) };
 }
 
 function parseBody(event: APIGatewayProxyEventV2WithJWTAuthorizer): Record<string, unknown> {
@@ -218,6 +244,6 @@ export async function handler(
     await flushBilling();
 
     logResponse(result.status);
-    return respond(result.status, result.body);
+    return respond(result.status, result.body, event.headers?.origin ?? event.headers?.Origin);
   });
 }
