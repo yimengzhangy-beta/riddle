@@ -30,8 +30,6 @@ export default function Play({ onStats }: Props) {
   const [verdict, setVerdict] = useState<GuessResult | null>(null);
   const [busy, setBusy] = useState(false);
   const [notice, setNotice] = useState<string | null>(null);
-  /** Difficulties the plan doesn't cover — learned from a 403, then shown as locked. */
-  const [locked, setLocked] = useState<Set<Difficulty>>(new Set());
   const [confirmHint, setConfirmHint] = useState(false);
   const guessRef = useRef<HTMLInputElement>(null);
 
@@ -54,10 +52,7 @@ export default function Play({ onStats }: Props) {
         setNotice('Something went wrong. Try again.');
         return;
       }
-      if (err.isNotEntitled) {
-        setLocked((prev) => new Set(prev).add(difficulty));
-        setNotice(`${cap(difficulty)} riddles aren't part of your plan yet.`);
-      } else if (err.status === 409) {
+      if (err.status === 409) {
         // Every riddle at this difficulty has already been served to them.
         setNotice(`You've seen every ${difficulty} riddle. Try another difficulty.`);
       } else if (err.status === 404) {
@@ -85,8 +80,6 @@ export default function Play({ onStats }: Props) {
       if (err instanceof ApiError && err.status === 409) {
         setNotice('You have already solved this one.');
         setPhase({ kind: 'picking' });
-      } else if (err instanceof ApiError && err.isNotEntitled) {
-        setNotice("You've used all the guesses your plan includes this month.");
       } else {
         setNotice(err instanceof Error ? err.message : 'Something went wrong.');
       }
@@ -112,8 +105,8 @@ export default function Play({ onStats }: Props) {
       });
       guessRef.current?.focus();
     } catch (err) {
-      if (err instanceof ApiError && err.isNotEntitled) {
-        setNotice("You've used all the hints your plan includes this month.");
+      if (err instanceof ApiError) {
+        setNotice(err.message);
       } else {
         setNotice(err instanceof Error ? err.message : 'Could not take a hint.');
       }
@@ -139,14 +132,6 @@ export default function Play({ onStats }: Props) {
         {notice && (
           <div className="notice" style={{ marginTop: '1.25rem' }}>
             {notice}
-            {locked.size > 0 && (
-              <>
-                {' '}
-                <a href="/pricing" onClick={link('/pricing')} style={{ color: 'var(--accent)' }}>
-                  See plans →
-                </a>
-              </>
-            )}
           </div>
         )}
 
@@ -159,11 +144,7 @@ export default function Play({ onStats }: Props) {
               disabled={phase.kind === 'loading'}
             >
               <span className="difficulty__name">{cap(d)}</span>
-              {locked.has(d) ? (
-                <span className="difficulty__lock">Not in your plan</span>
-              ) : (
-                <span className="difficulty__points">{BASE_POINTS[d]} pts</span>
-              )}
+              <span className="difficulty__points">{BASE_POINTS[d]} pts</span>
             </button>
           ))}
         </div>
@@ -217,10 +198,7 @@ export default function Play({ onStats }: Props) {
       {verdict && <Verdict result={verdict} />}
       {notice && (
         <div className="notice" style={{ marginTop: '1rem' }}>
-          {notice}{' '}
-          <a href="/pricing" onClick={link('/pricing')} style={{ color: 'var(--accent)' }}>
-            See plans →
-          </a>
+          {notice}
         </div>
       )}
 
@@ -282,21 +260,13 @@ export default function Play({ onStats }: Props) {
 // ------------------------------------------------------------------- pieces
 
 function Verdict({ result }: { result: GuessResult }) {
-  // The free plan answers a near-miss with an upgrade nudge rather than a
-  // judgment. Surface it as an offer, not as a failure.
-  const nudge = /upgrade/i.test(result.reason);
   const tone = result.verdict === 'close' ? 'close' : 'wrong';
   return (
     <div className={`verdict verdict--${tone}`}>
       <span className="verdict__label">
         {result.verdict === 'close' ? 'Close.' : 'Not quite.'}
       </span>
-      {nudge ? result.reason.replace(/\s*Upgrade.*$/i, '') : result.reason}
-      {nudge && (
-        <a className="verdict__upgrade" href="/pricing" onClick={link('/pricing')}>
-          Let Claude judge near-misses →
-        </a>
-      )}
+      {result.reason}
     </div>
   );
 }

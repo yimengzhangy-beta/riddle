@@ -59,16 +59,16 @@ rule is enforced by the signature rather than by the caller remembering it.
 
 | group | contents | retention |
 | ----- | -------- | --------- |
-| `/aws/lambda/riddle-api` | the events above | 90 days |
-| `/aws/apigateway/riddle-api-access` | one line per HTTP request, including the ones the Lambda never sees | 90 days |
+| `/aws/lambda/riddle-demo-api` | the events above | 90 days |
+| `/aws/apigateway/riddle-demo-api-access` | one line per HTTP request, including the ones the Lambda never sees | 90 days |
 
 The access log exists because a rejected JWT is a 401 from the authorizer — no Lambda
 invocation, no `request` event, and previously no trace at all. Both groups are declared
-in `lib/app-stack.ts`; the function name is pinned to `riddle-api` so the log group name
+in `lib/app-stack.ts`; the function name is pinned to `riddle-demo-api` so the log group name
 is stable across replacements.
 
 Six saved queries ship with the stack (CloudWatch → Logs Insights → Saved queries,
-prefix `riddle/`): per-user activity trail, single-request story, latency by route,
+prefix `riddle-demo/`): per-user activity trail, single-request story, latency by route,
 llm-judged vs normalized guesses, token spend by user, and rejected before the lambda.
 
 ## Layout rules

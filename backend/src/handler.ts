@@ -1,13 +1,11 @@
 import type { APIGatewayProxyEventV2WithJWTAuthorizer, APIGatewayProxyResultV2 } from 'aws-lambda';
 import { randomUUID } from 'crypto';
 import { ForbiddenError, UnauthorizedError, optionalUserId, playerOf, requireAdmin } from './auth';
-import { NotEntitledError, flushBilling } from './billing';
 import { ConflictError, NotFoundError, ValidationError } from './engine/riddles';
 import { ModelOutputError } from './llm/client';
 import { logError, logResponse, stackFrames, withRequest } from './log';
 import * as adminRoutes from './routes/admin';
 import * as authRoutes from './routes/auth';
-import * as billingRoutes from './routes/billing';
 import { BadRequest } from './routes/input';
 import * as meRoutes from './routes/me';
 import type { RouteResult } from './routes/result';
@@ -113,26 +111,9 @@ async function route(event: APIGatewayProxyEventV2WithJWTAuthorizer): Promise<Ro
     return authRoutes.postLogin(parseBody(event));
   }
 
-  // Public so the pricing page can render to a signed-out visitor.
-  if (method === 'GET' && match(segments, ['plans'])) {
-    return billingRoutes.getPlans();
-  }
-
   // --------------------------------------------------------- authenticated
   if (method === 'GET' && match(segments, ['me'])) {
     return meRoutes.getProfile(playerOf(event));
-  }
-
-  if (method === 'GET' && match(segments, ['subscription'])) {
-    return billingRoutes.getSubscription(playerOf(event));
-  }
-
-  if (method === 'GET' && match(segments, ['subscription', 'summary'])) {
-    return billingRoutes.getSubscriptionSummary(playerOf(event));
-  }
-
-  if (method === 'POST' && match(segments, ['subscribe'])) {
-    return billingRoutes.postSubscribe(playerOf(event), parseBody(event));
   }
 
   if (method === 'GET' && match(segments, ['riddles', 'next'])) {
@@ -171,20 +152,6 @@ function errorResult(err: unknown): RouteResult {
   }
   if (err instanceof ConflictError) {
     return { status: 409, body: { error: err.message } };
-  }
-  if (err instanceof NotEntitledError) {
-    // Distinct from ForbiddenError: the caller is authenticated and allowed to
-    // be here, their plan just does not cover this. The reason is an enum from
-    // the billing backend, and the pointer tells the client where to go next.
-    return {
-      status: 403,
-      body: {
-        error: err.message,
-        reason: err.reason,
-        action: err.action,
-        upgradeUrl: '/pricing',
-      },
-    };
   }
   if (err instanceof ModelOutputError) {
     return { status: 502, body: { error: `Model output could not be used: ${err.message}` } };
@@ -238,10 +205,6 @@ export async function handler(
     } catch (err) {
       result = errorResult(err);
     }
-
-    // The SDK batches usage events, and a Lambda is frozen the instant it
-    // returns — anything still buffered here would never be sent.
-    await flushBilling();
 
     logResponse(result.status);
     return respond(result.status, result.body, event.headers?.origin ?? event.headers?.Origin);

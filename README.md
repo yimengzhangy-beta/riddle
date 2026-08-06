@@ -121,8 +121,8 @@ Every request writes a structured JSON audit trail. All events of one request sh
 
 | Log group | Contents | Retention |
 | --------- | -------- | --------- |
-| `/aws/lambda/riddle-api` | `request` → `llm_call` / `db_write` / `guess_resolved` → `response` | 90 days |
-| `/aws/apigateway/riddle-api-access` | one line per HTTP request, including the 401s the authorizer rejects before the Lambda runs | 90 days |
+| `/aws/lambda/riddle-demo-api` | `request` → `llm_call` / `db_write` / `guess_resolved` → `response` | 90 days |
+| `/aws/apigateway/riddle-demo-api-access` | one line per HTTP request, including the 401s the authorizer rejects before the Lambda runs | 90 days |
 
 **No user content is ever logged** — no guess text, no riddle answers. Ids, enum values,
 counts and timings only. See CLAUDE.md before adding an event.
@@ -131,7 +131,7 @@ Most guesses are settled by normalisation and make no model call, so they emit *
 `llm_call` event; `guess_resolved.resolution` records which path was taken.
 
 Six queries ship with the stack — CloudWatch → **Logs Insights** → *Saved queries*,
-prefix `riddle/`:
+prefix `riddle-demo/`:
 
 | Query | Answers |
 | ----- | ------- |

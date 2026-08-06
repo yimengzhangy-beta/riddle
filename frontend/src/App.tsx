@@ -1,11 +1,8 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { getMe } from './api';
-import { currentEmail, isSignedIn, signOut } from './cognito';
-import Activating from './pages/Activating';
+import { isSignedIn, signOut } from './cognito';
 import Auth from './pages/Auth';
 import Play from './pages/Play';
-import Pricing from './pages/Pricing';
-import Subscription from './pages/Subscription';
 import { navigate, usePath } from './router';
 
 interface Stats {
@@ -13,8 +10,8 @@ interface Stats {
   streak: number;
 }
 
-/** Routes a signed-out visitor can still reach. Pricing has to be one of them. */
-const PUBLIC_PATHS = ['/pricing', '/pricing/activating'];
+/** Routes a signed-out visitor can still reach. None yet — everything is behind auth. */
+const PUBLIC_PATHS: string[] = [];
 
 export default function App() {
   const path = usePath();
@@ -56,12 +53,6 @@ export default function App() {
       <main>
         {!signedIn && needsAuth ? (
           <Auth onDone={() => setSignedIn(true)} />
-        ) : path === '/pricing' ? (
-          <Pricing />
-        ) : path === '/pricing/activating' ? (
-          <Activating />
-        ) : path === '/subscription' ? (
-          <Subscription onSignOut={leave} />
         ) : (
           <Play onStats={setStats} />
         )}
@@ -133,19 +124,8 @@ function Header({
               Play
             </a>
           )}
-          <a href="/pricing" onClick={go('/pricing')} data-active={path === '/pricing'}>
-            Plans
-          </a>
           {signedIn && (
             <>
-              <a
-                href="/subscription"
-                onClick={go('/subscription')}
-                data-active={path === '/subscription'}
-                title={currentEmail() ?? undefined}
-              >
-                Account
-              </a>
               <a
                 href="/"
                 onClick={(e) => {

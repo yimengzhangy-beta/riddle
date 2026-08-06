@@ -16,22 +16,13 @@ export function apiConfigured(): boolean {
   return API_URL !== '';
 }
 
-/** A non-2xx response, carrying the parsed body so callers can read `upgradeUrl`. */
+/** A non-2xx response, carrying the parsed body so callers can branch on it. */
 export class ApiError extends Error {
   constructor(
     readonly status: number,
     readonly body: Record<string, unknown>
   ) {
     super(typeof body.error === 'string' ? body.error : `Request failed (${status})`);
-  }
-
-  /** The player's plan does not cover this — the body carries where to go next. */
-  get isNotEntitled(): boolean {
-    return this.status === 403;
-  }
-
-  get upgradeUrl(): string {
-    return typeof this.body.upgradeUrl === 'string' ? this.body.upgradeUrl : '/pricing';
   }
 }
 
@@ -140,80 +131,3 @@ export const takeHint = (riddleId: string) =>
     auth: true,
     method: 'POST',
   });
-
-// ------------------------------------------------------------------ billing
-
-export interface Allowance {
-  action: string | null;
-  label: string;
-  includedUnits: number | null;
-  overageCents: number | null;
-}
-
-export interface Plan {
-  planId: string;
-  name: string;
-  description: string;
-  currency: string;
-  sortOrder: number;
-  monthlyCents: number;
-  /** Plan-wide spend cap in cents for the period, or null when uncapped. */
-  budgetLimitCents: number | null;
-  allowances: Allowance[];
-}
-
-export interface UsageRow {
-  action: string | null;
-  label: string;
-  currentUsage: number;
-  includedUnits: number | null;
-  overageCents: number | null;
-}
-
-export interface Summary {
-  planId: string | null;
-  planName?: string | null;
-  currency?: string;
-  billingCycle?: string;
-  billingAnchorDate?: string | null;
-  nextPeriodBoundary?: string | null;
-  pendingChange?: { planId?: string | null; effectiveDate?: string } | null;
-  estimatedChargeCents?: number;
-  budgetLimitCents?: number | null;
-  usage?: UsageRow[];
-}
-
-export interface CheckoutSession {
-  checkoutUrl?: string;
-  expiresAt?: string;
-  effectiveAt?: string;
-}
-
-/** Public — renders for a signed-out visitor. */
-export const fetchPlans = () => request<{ plans: Plan[] }>('/plans');
-
-export const fetchSubscription = () =>
-  request<{ planId: string | null }>('/subscription', { auth: true });
-
-export const fetchSummary = () => request<Summary>('/subscription/summary', { auth: true });
-
-export const subscribe = (planId: string) =>
-  request<CheckoutSession>('/subscribe', {
-    auth: true,
-    method: 'POST',
-    body: JSON.stringify({ planId }),
-  });
-
-// -------------------------------------------------------------- formatting
-
-/** Amounts cross the wire in cents. This is the only place they become dollars. */
-export function formatCents(cents: number, currency = 'USD'): string {
-  return new Intl.NumberFormat('en-US', { style: 'currency', currency }).format(cents / 100);
-}
-
-/** ISO timestamp → a plain date. Billing dates are days, not moments. */
-export function formatDate(iso: string | null | undefined): string {
-  if (!iso) return '—';
-  const d = new Date(iso);
-  return Number.isNaN(d.getTime()) ? '—' : d.toLocaleDateString();
-}

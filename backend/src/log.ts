@@ -15,29 +15,8 @@ import { AsyncLocalStorage } from 'async_hooks';
 
 export type LlmPurpose = 'guess_judgment' | 'riddle_generation';
 
-/**
- * How a guess was settled. `normalized` means it never reached the model.
- * `judge_not_entitled` means the player's plan does not include Claude judging,
- * so an inexact guess was settled by string comparison alone — the difference
- * between that and `llm_judged` is the free-to-paid conversion opportunity.
- */
-export type GuessResolution =
-  | 'normalized'
-  | 'llm_judged'
-  | 'llm_unavailable'
-  | 'judge_not_entitled';
-
-/**
- * The metered actions. Each value is the `sourceEventType` of a published
- * AWS Monetization metric — the strings are the contract with the billing
- * backend, so they are spelled here once and imported everywhere else.
- */
-export type BillableAction =
-  | 'serve_riddle'
-  | 'serve_hard_riddle'
-  | 'submit_guess'
-  | 'take_hint'
-  | 'judge_guess';
+/** How a guess was settled. `normalized` means it never reached the model. */
+export type GuessResolution = 'normalized' | 'llm_judged' | 'llm_unavailable';
 
 interface RequestContext {
   requestId: string;
@@ -140,67 +119,6 @@ export function logGuessResolved(fields: {
   hintsTaken: number;
 }): void {
   emit('guess_resolved', fields);
-}
-
-/**
- * One entitlement decision. Every field is an id or an enum the billing backend
- * defines — `reason` is a code like NO_SUBSCRIPTION or QUOTA_EXCEEDED, never a
- * sentence built from the player's request.
- */
-export function logEntitlement(fields: {
-  action: BillableAction;
-  decision: 'ALLOW' | 'DENY';
-  reason: string;
-  planId: string | null;
-  enforced: boolean;
-}): void {
-  emit('entitlement', fields);
-}
-
-/** One usage event handed to the billing backend. Counts only. */
-export function logMetered(fields: {
-  action: BillableAction;
-  quantity: number;
-  ok: boolean;
-  /** Error class name only — an SDK message can quote what it was given. */
-  error?: string;
-}): void {
-  emit('metered', fields);
-}
-
-/**
- * One control-plane billing call, recorded whether it succeeded or not.
- *
- * `serviceRequestId` is the billing backend's own request id, which is the only
- * identifier AWS can trace a call by — our `requestId` is API Gateway's and
- * means nothing to them. Without this, a checkout that creates a session the
- * player never completes leaves nothing to escalate with.
- *
- * `outcome` records which of the three checkout shapes came back, so a payment
- * that was never attempted is distinguishable from one that was declined.
- */
-export function logBillingCall(fields: {
-  op: 'create_checkout' | 'get_subscription' | 'list_plans';
-  planId?: string;
-  serviceRequestId?: string | null;
-  outcome?: 'checkout_issued' | 'scheduled' | 'applied_immediately' | 'failed';
-  /** Error class name only — never the message, which can quote its input. */
-  error?: string;
-}): void {
-  emit('billing_call', fields);
-}
-
-/**
- * A billing call that failed for operational reasons — distinct from a DENY,
- * which is an answer rather than a failure. The class name only, for the same
- * reason `logError` withholds messages from SDK errors.
- */
-export function logBillingError(fields: {
-  where: string;
-  action: BillableAction | null;
-  name: string;
-}): void {
-  emit('billing_error', fields);
 }
 
 /**

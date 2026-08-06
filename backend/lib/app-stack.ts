@@ -21,27 +21,13 @@ const ANTHROPIC_SECRET_NAME = 'cofounder/anthropic-api-key';
 const ADMIN_GROUP = 'admins';
 
 /**
- * Fixed so the log group is `/aws/lambda/riddle-api` rather than a generated
+ * Fixed so the log group is `/aws/lambda/riddle-demo-api` rather than a generated
  * name that changes whenever the construct is replaced.
  */
-const FUNCTION_NAME = 'riddle-api';
+const FUNCTION_NAME = 'riddle-demo-api';
 
 /** 90 days, for both the Lambda audit log and the API Gateway access log. */
 const LOG_RETENTION = logs.RetentionDays.THREE_MONTHS;
-
-/**
- * The AWS Monetization app these plans and metrics live under. The control
- * plane is us-east-1 regardless of where this stack is deployed — that region
- * is a property of the service, not of the app.
- */
-const MONETIZATION_APP_ID = '0c07accf-9932-4c68-a048-7564bea6a505';
-const MONETIZATION_REGION = 'us-east-1';
-
-/**
- * The endpoint these plans were created against. The SDK's built-in default is a
- * different host and does not resolve, so this is required rather than optional.
- */
-const MONETIZATION_ENDPOINT = 'https://us-east-1.monetization.aws.dev';
 
 /**
  * Where the web app is served from — the origin a player's browser returns to
@@ -135,7 +121,6 @@ export class AppStack extends cdk.Stack {
       logGroup: handlerLogGroup,
       entry: 'src/handler.ts',
       handler: 'handler',
-      // 24, not 22: @aws-monetization/sdk declares engines.node >= 24.
       runtime: lambda.Runtime.NODEJS_24_X,
       memorySize: 1024,
       // A guess makes at most one Anthropic call; admin generation makes one call
@@ -150,12 +135,6 @@ export class AppStack extends cdk.Stack {
         USER_POOL_ID: userPool.userPoolId,
         USER_POOL_CLIENT_ID: userPoolClient.userPoolClientId,
         ADMIN_GROUP,
-        MONETIZATION_APP_ID,
-        MONETIZATION_REGION,
-        MONETIZATION_ENDPOINT,
-        // Set to 'false' to keep every route open while checking that metering
-        // works on its own. Any other value (or none) enforces entitlement.
-        MONETIZATION_ENFORCE: 'true',
         APP_BASE_URL,
         ALLOWED_ORIGINS: ALLOWED_ORIGINS.join(','),
       },
@@ -181,35 +160,6 @@ export class AppStack extends cdk.Stack {
       })
     );
 
-    // AWS Monetization runtime calls: entitlement gates, usage metering, the
-    // pricing page, and checkout.
-    //
-    // `resources: ['*']` is deliberate, not an oversight. These operations are
-    // not resource-scoped by the service in its current form: every attempt to
-    // narrow to the app — `app/<id>`, `app/<id>/*`, account-wide, or any other
-    // arn:aws:monetization:… pattern — is rejected with AccessDeniedException,
-    // while the same call under `*` succeeds. IAM's own policy simulator reports
-    // the app-scoped ARN as `allowed`, so the mismatch is in what the service
-    // authorises against, not in the policy document.
-    //
-    // Least privilege is kept where it still bites: the seven actions below are
-    // exactly the ones the app calls, so this role cannot create, publish or
-    // archive plans and metrics. Narrow `resources` to the app ARN once the
-    // service supports it.
-    apiHandler.addToRolePolicy(
-      new iam.PolicyStatement({
-        actions: [
-          'monetization:GetEntitlementDecision',
-          'monetization:PutEvent',
-          'monetization:PutAwsServiceEvent',
-          'monetization:ListPlans',
-          'monetization:CreateCheckoutSession',
-          'monetization:CancelSubscription',
-          'monetization:GetSubscription',
-        ],
-        resources: ['*'],
-      })
-    );
 
     // --------------------------------------------------------------- HTTP API
 
@@ -241,20 +191,11 @@ export class AppStack extends cdk.Stack {
 
     // Public — these are how you obtain a token in the first place.
     api.addRoutes({ path: '/health', methods: [apigwv2.HttpMethod.GET], integration, ...open });
-    // Public: the pricing page has to render before a visitor has an account.
-    api.addRoutes({ path: '/plans', methods: [apigwv2.HttpMethod.GET], integration, ...open });
     api.addRoutes({ path: '/signup', methods: [apigwv2.HttpMethod.POST], integration, ...open });
     api.addRoutes({ path: '/login', methods: [apigwv2.HttpMethod.POST], integration, ...open });
 
     // Authenticated.
     api.addRoutes({ path: '/me', methods: [apigwv2.HttpMethod.GET], integration });
-    api.addRoutes({ path: '/subscription', methods: [apigwv2.HttpMethod.GET], integration });
-    api.addRoutes({
-      path: '/subscription/summary',
-      methods: [apigwv2.HttpMethod.GET],
-      integration,
-    });
-    api.addRoutes({ path: '/subscribe', methods: [apigwv2.HttpMethod.POST], integration });
     api.addRoutes({ path: '/riddles/next', methods: [apigwv2.HttpMethod.GET], integration });
     api.addRoutes({ path: '/riddles/{id}/guess', methods: [apigwv2.HttpMethod.POST], integration });
     api.addRoutes({ path: '/riddles/{id}/hint', methods: [apigwv2.HttpMethod.POST], integration });
@@ -308,7 +249,7 @@ export class AppStack extends cdk.Stack {
 
     const savedQuery = (id: string, name: string, logGroupNames: string[], queryString: string) =>
       new logs.CfnQueryDefinition(this, id, {
-        name: `riddle/${name}`,
+        name: `riddle-demo/${name}`,
         logGroupNames,
         queryString,
       });
