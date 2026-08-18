@@ -4,11 +4,11 @@ import { AppStack } from '../lib/app-stack';
 
 const app = new cdk.App();
 
-new AppStack(app, 'RiddleDemoStack', {
+new AppStack(app, 'RiddleStack', {
   env: {
     account: '136311627418',
     region: 'us-east-1',
   },
 });
 
-cdk.Tags.of(app).add('project', 'riddle-demo');
+cdk.Tags.of(app).add('project', 'riddle');

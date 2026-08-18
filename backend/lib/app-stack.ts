@@ -21,19 +21,19 @@ const ANTHROPIC_SECRET_NAME = 'cofounder/anthropic-api-key';
 const ADMIN_GROUP = 'admins';
 
 /**
- * Fixed so the log group is `/aws/lambda/riddle-demo-api` rather than a generated
+ * Fixed so the log group is `/aws/lambda/riddle-api` rather than a generated
  * name that changes whenever the construct is replaced.
  */
-const FUNCTION_NAME = 'riddle-demo-api';
+const FUNCTION_NAME = 'riddle-api';
 
 /** 90 days, for both the Lambda audit log and the API Gateway access log. */
 const LOG_RETENTION = logs.RetentionDays.THREE_MONTHS;
 
 /**
- * Where the web app is served from — the origin a player's browser returns to
- * after paying. This is the Amplify URL, not the API's: the Lambda cannot infer
- * it from a request, because its own origin is API Gateway. Override at synth
- * time once the frontend has a domain:
+ * Where the web app is served from — the browser origin CORS must allow. This is
+ * the Amplify URL, not the API's: the Lambda cannot infer it from a request,
+ * because its own origin is API Gateway. Override at synth time once the
+ * frontend has a domain:
  *
  *   APP_BASE_URL=https://main.xxxx.amplifyapp.com npx cdk deploy
  */
@@ -249,7 +249,7 @@ export class AppStack extends cdk.Stack {
 
     const savedQuery = (id: string, name: string, logGroupNames: string[], queryString: string) =>
       new logs.CfnQueryDefinition(this, id, {
-        name: `riddle-demo/${name}`,
+        name: `riddle/${name}`,
         logGroupNames,
         queryString,
       });

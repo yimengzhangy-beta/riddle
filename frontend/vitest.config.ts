@@ -7,5 +7,7 @@ export default defineConfig({
     environment: 'jsdom',
     globals: true,
     include: ['src/__tests__/**/*.test.tsx'],
+    // No unit tests at the moment; keep `npm test` green until some land.
+    passWithNoTests: true,
   },
 });

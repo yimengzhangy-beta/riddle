@@ -3,10 +3,10 @@ import { useEffect, useState } from 'react';
 /**
  * A very small path router.
  *
- * The app has no routing library yet, and only needs a couple of real URLs
- * — checkout has to be able to send a player back to one. Rather than pull in a
- * dependency for that, this reads `location.pathname` and re-renders on history
- * changes. Swap it for a real router when the riddle UI needs one.
+ * The app has no routing library yet, and only needs a couple of real URLs.
+ * Rather than pull in a dependency for that, this reads `location.pathname` and
+ * re-renders on history changes. Swap it for a real router when the riddle UI
+ * needs one.
  *
  * Note for deployment: because these are real paths rather than hashes, static
  * hosting must rewrite unknown paths to index.html (Amplify: add a rewrite of
