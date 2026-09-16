@@ -177,8 +177,14 @@ export class AppStack extends cdk.Stack {
 
     // Runtime calls the AWS Monetization SDK makes from the handler: entitlement
     // checks, usage metering, and minting the hosted pricing / billing-portal
-    // sessions. Per-user runtime actions only — nothing here can create,
-    // publish or archive plans/metrics.
+    // sessions.
+    //
+    // `resources: ['*']` is deliberate. Scoping these to the app ARN
+    // (`arn:aws:monetization:us-east-1:<acct>:app/<appId>`) is rejected by the
+    // service with AccessDeniedException while the same call under `*` succeeds
+    // (verified on deploy). Least privilege is kept in the action list — these
+    // are per-user runtime calls only; nothing here can create, publish or
+    // archive plans/metrics. Narrow the resource once the service accepts it.
     apiHandler.addToRolePolicy(
       new iam.PolicyStatement({
         sid: 'MonetizationAIRuntime',
@@ -188,12 +194,13 @@ export class AppStack extends cdk.Stack {
           'monetization:PutAwsServiceEvent',
           'monetization:ListPlans',
           'monetization:CreateCheckoutSession',
+          // The SDK's createBillingPortalSession sends its own command — not
+          // covered by CreateCheckoutSession (verified: AccessDenied without it).
+          'monetization:CreateBillingPortalSession',
           'monetization:CancelSubscription',
           'monetization:GetSubscription',
         ],
-        resources: [
-          `arn:aws:monetization:${MONETIZATION_REGION}:${this.account}:app/${MONETIZATION_APP_ID}`,
-        ],
+        resources: ['*'],
       })
     );
 
