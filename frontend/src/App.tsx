@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { getMe } from './api';
-import { clearBillingCookies, openHostedPortal, openHostedPricing } from './billing';
+import { openHostedPortal, openHostedPricing } from './billing';
 import { isSignedIn, signOut } from './cognito';
 import Auth from './pages/Auth';
 import Play from './pages/Play';
@@ -36,7 +36,6 @@ export default function App() {
   }, [signedIn, loadStats]);
 
   function leave() {
-    clearBillingCookies();
     signOut();
     setSignedIn(false);
     navigate('/');
@@ -133,7 +132,9 @@ function Header({
               href="/upgrade"
               onClick={(e) => {
                 e.preventDefault();
-                void openHostedPricing().catch(() => {});
+                void openHostedPricing().catch(() =>
+                  alert('Could not open plans — please try again.')
+                );
               }}
             >
               Upgrade
@@ -144,7 +145,9 @@ function Header({
               href="/subscription"
               onClick={(e) => {
                 e.preventDefault();
-                void openHostedPortal().catch(() => {});
+                void openHostedPortal().catch(() =>
+                  alert('Could not open your subscription — please try again.')
+                );
               }}
             >
               Manage subscription
