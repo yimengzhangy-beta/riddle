@@ -21,3 +21,9 @@ credentials
 
 # OS noise
 .DS_Store
+
+# monetize skill local state
+.monetize/
+
+# AWS Monetization runtime config (ids only, but env-specific)
+.env.monetization

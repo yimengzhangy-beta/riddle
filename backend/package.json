@@ -4,14 +4,17 @@
   "version": "0.1.0",
   "scripts": {
     "build": "tsc",
+    "test": "vitest run",
     "cdk": "cdk"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.72.0",
+    "@aws-monetization/sdk": "^0.1.1789529156",
     "@aws-sdk/client-cognito-identity-provider": "^3.1095.0",
     "@aws-sdk/client-dynamodb": "^3.600.0",
     "@aws-sdk/client-secrets-manager": "^3.600.0",
-    "@aws-sdk/lib-dynamodb": "^3.600.0"
+    "@aws-sdk/lib-dynamodb": "^3.600.0",
+    "dotenv": "^17.4.2"
   },
   "devDependencies": {
     "@types/aws-lambda": "^8.10.140",
@@ -21,6 +24,7 @@
     "constructs": "^10.3.0",
     "esbuild": "^0.23.0",
     "ts-node": "^10.9.2",
-    "typescript": "^5.5.3"
+    "typescript": "^5.5.3",
+    "vitest": "^4.1.11"
   }
 }

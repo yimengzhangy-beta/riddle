@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { getMe } from './api';
+import { clearBillingCookies, openHostedPortal, openHostedPricing } from './billing';
 import { isSignedIn, signOut } from './cognito';
 import Auth from './pages/Auth';
 import Play from './pages/Play';
@@ -35,6 +36,7 @@ export default function App() {
   }, [signedIn, loadStats]);
 
   function leave() {
+    clearBillingCookies();
     signOut();
     setSignedIn(false);
     navigate('/');
@@ -122,6 +124,30 @@ function Header({
           {signedIn && (
             <a href="/" onClick={go('/')} data-active={path === '/'}>
               Play
+            </a>
+          )}
+          {/* Hosted by MonetizationAI — these launchers redirect to the hosted
+              pricing page / billing portal; the app builds neither. */}
+          {signedIn && (
+            <a
+              href="/upgrade"
+              onClick={(e) => {
+                e.preventDefault();
+                void openHostedPricing().catch(() => {});
+              }}
+            >
+              Upgrade
+            </a>
+          )}
+          {signedIn && (
+            <a
+              href="/subscription"
+              onClick={(e) => {
+                e.preventDefault();
+                void openHostedPortal().catch(() => {});
+              }}
+            >
+              Manage subscription
             </a>
           )}
           {signedIn && (
