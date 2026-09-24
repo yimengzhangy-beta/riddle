@@ -46,18 +46,6 @@ const APP_BASE_URL = process.env.APP_BASE_URL ?? 'https://main.d2v99bb7j5etb9.am
  */
 const ALLOWED_ORIGINS = [APP_BASE_URL, 'http://localhost:5173'];
 
-/**
- * AWS Monetization — the app that holds this game's plans and metrics
- * (`riddle-demo-v2`, created by the /monetize skill). The control plane is
- * us-east-1 regardless of where the stack deploys. MONETIZATION_ENFORCE stays
- * 'false' until the plans are published (they are drafts pending seller
- * onboarding) — enforcing against unpublished plans would deny every player.
- */
-const MONETIZATION_APP_ID =
-  process.env.MONETIZATION_APP_ID ?? '10475490-c5a2-4f49-909d-ab2636d8ea81';
-const MONETIZATION_REGION = 'us-east-1';
-const MONETIZATION_ENFORCE = process.env.MONETIZATION_ENFORCE ?? 'false';
-
 export class AppStack extends cdk.Stack {
   constructor(scope: Construct, id: string, props?: cdk.StackProps) {
     super(scope, id, props);
@@ -149,9 +137,6 @@ export class AppStack extends cdk.Stack {
         ADMIN_GROUP,
         APP_BASE_URL,
         ALLOWED_ORIGINS: ALLOWED_ORIGINS.join(','),
-        MONETIZATION_APP_ID,
-        MONETIZATION_REGION,
-        MONETIZATION_ENFORCE,
       },
       bundling: {
         // Ship the judge/generation prompt files as inlined strings.
@@ -172,35 +157,6 @@ export class AppStack extends cdk.Stack {
           'cognito-idp:AdminUpdateUserAttributes',
         ],
         resources: [userPool.userPoolArn],
-      })
-    );
-
-    // Runtime calls the AWS Monetization SDK makes from the handler: entitlement
-    // checks, usage metering, and minting the hosted pricing / billing-portal
-    // sessions.
-    //
-    // `resources: ['*']` is deliberate. Scoping these to the app ARN
-    // (`arn:aws:monetization:us-east-1:<acct>:app/<appId>`) is rejected by the
-    // service with AccessDeniedException while the same call under `*` succeeds
-    // (verified on deploy). Least privilege is kept in the action list — these
-    // are per-user runtime calls only; nothing here can create, publish or
-    // archive plans/metrics. Narrow the resource once the service accepts it.
-    apiHandler.addToRolePolicy(
-      new iam.PolicyStatement({
-        sid: 'MonetizationAIRuntime',
-        actions: [
-          'monetization:GetEntitlementDecision',
-          'monetization:PutEvent',
-          'monetization:PutAwsServiceEvent',
-          'monetization:ListPlans',
-          'monetization:CreateCheckoutSession',
-          // The SDK's createBillingPortalSession sends its own command — not
-          // covered by CreateCheckoutSession (verified: AccessDenied without it).
-          'monetization:CreateBillingPortalSession',
-          'monetization:CancelSubscription',
-          'monetization:GetSubscription',
-        ],
-        resources: ['*'],
       })
     );
 
@@ -245,8 +201,6 @@ export class AppStack extends cdk.Stack {
     api.addRoutes({ path: '/riddles/{id}/hint', methods: [apigwv2.HttpMethod.POST], integration });
     // Authenticated *and* gated on the `admins` group inside the handler.
     api.addRoutes({ path: '/admin/generate', methods: [apigwv2.HttpMethod.POST], integration });
-    // Billing (AWS Monetization): mints the hosted pricing/portal session URLs.
-    api.addRoutes({ path: '/billing/session', methods: [apigwv2.HttpMethod.GET], integration });
 
     // Steady-state ceiling with headroom above 300 TPS.
     const stage = api.defaultStage!.node.defaultChild as apigwv2.CfnStage;
@@ -398,6 +352,5 @@ export class AppStack extends cdk.Stack {
     new cdk.CfnOutput(this, 'UserPoolId', { value: userPool.userPoolId });
     new cdk.CfnOutput(this, 'UserPoolClientId', { value: userPoolClient.userPoolClientId });
     new cdk.CfnOutput(this, 'AnthropicSecretName', { value: ANTHROPIC_SECRET_NAME });
-    new cdk.CfnOutput(this, 'MonetizationAppId', { value: MONETIZATION_APP_ID });
   }
 }

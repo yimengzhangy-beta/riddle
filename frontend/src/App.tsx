@@ -1,6 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { getMe } from './api';
-import { openHostedPortal, openHostedPricing } from './billing';
 import { isSignedIn, signOut } from './cognito';
 import Auth from './pages/Auth';
 import Play from './pages/Play';
@@ -123,34 +122,6 @@ function Header({
           {signedIn && (
             <a href="/" onClick={go('/')} data-active={path === '/'}>
               Play
-            </a>
-          )}
-          {/* Hosted by MonetizationAI — these launchers redirect to the hosted
-              pricing page / billing portal; the app builds neither. */}
-          {signedIn && (
-            <a
-              href="/upgrade"
-              onClick={(e) => {
-                e.preventDefault();
-                void openHostedPricing().catch(() =>
-                  alert('Could not open plans — please try again.')
-                );
-              }}
-            >
-              Upgrade
-            </a>
-          )}
-          {signedIn && (
-            <a
-              href="/subscription"
-              onClick={(e) => {
-                e.preventDefault();
-                void openHostedPortal().catch(() =>
-                  alert('Could not open your subscription — please try again.')
-                );
-              }}
-            >
-              Manage subscription
             </a>
           )}
           {signedIn && (
