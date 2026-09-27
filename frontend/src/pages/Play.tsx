@@ -10,6 +10,7 @@ import {
   submitGuess,
   takeHint,
 } from '../api';
+import { openHostedPricing } from '../billing';
 import { navigate } from '../router';
 
 const DIFFICULTIES: Difficulty[] = ['easy', 'medium', 'hard'];
@@ -30,8 +31,16 @@ export default function Play({ onStats }: Props) {
   const [verdict, setVerdict] = useState<GuessResult | null>(null);
   const [busy, setBusy] = useState(false);
   const [notice, setNotice] = useState<string | null>(null);
+  // Set alongside `notice` on a 403 whose body says decision:'DENY' — the
+  // player's plan doesn't cover the action, so the notice grows a plans link.
+  const [planDenied, setPlanDenied] = useState(false);
   const [confirmHint, setConfirmHint] = useState(false);
   const guessRef = useRef<HTMLInputElement>(null);
+
+  function fail(message: string, err?: unknown) {
+    setNotice(message);
+    setPlanDenied(err instanceof ApiError && err.planDenied);
+  }
 
   // Focus the guess box whenever a riddle appears, so typing just works.
   useEffect(() => {
@@ -43,6 +52,7 @@ export default function Play({ onStats }: Props) {
     setVerdict(null);
     setGuess('');
     setNotice(null);
+    setPlanDenied(false);
     try {
       const { riddle } = await nextRiddle(difficulty);
       setPhase({ kind: 'playing', riddle });
@@ -52,7 +62,10 @@ export default function Play({ onStats }: Props) {
         setNotice('Something went wrong. Try again.');
         return;
       }
-      if (err.status === 409) {
+      if (err.planDenied) {
+        // Out of riddles on this plan (or no plan yet).
+        fail(err.message, err);
+      } else if (err.status === 409) {
         // Every riddle at this difficulty has already been served to them.
         setNotice(`You've seen every ${difficulty} riddle. Try another difficulty.`);
       } else if (err.status === 404) {
@@ -80,6 +93,8 @@ export default function Play({ onStats }: Props) {
       if (err instanceof ApiError && err.status === 409) {
         setNotice('You have already solved this one.');
         setPhase({ kind: 'picking' });
+      } else if (err instanceof ApiError && err.planDenied) {
+        fail(err.message, err);
       } else {
         setNotice(err instanceof Error ? err.message : 'Something went wrong.');
       }
@@ -106,7 +121,7 @@ export default function Play({ onStats }: Props) {
       guessRef.current?.focus();
     } catch (err) {
       if (err instanceof ApiError) {
-        setNotice(err.message);
+        fail(err.message, err);
       } else {
         setNotice(err instanceof Error ? err.message : 'Could not take a hint.');
       }
@@ -132,6 +147,7 @@ export default function Play({ onStats }: Props) {
         {notice && (
           <div className="notice" style={{ marginTop: '1.25rem' }}>
             {notice}
+            {planDenied && <SeePlans />}
           </div>
         )}
 
@@ -199,6 +215,7 @@ export default function Play({ onStats }: Props) {
       {notice && (
         <div className="notice" style={{ marginTop: '1rem' }}>
           {notice}
+          {planDenied && <SeePlans />}
         </div>
       )}
 
@@ -326,4 +343,20 @@ function link(to: string) {
     e.preventDefault();
     navigate(to);
   };
+}
+
+/** The paywall nudge on a plan DENY: opens the hosted pricing page. */
+function SeePlans() {
+  return (
+    <a
+      className="verdict__upgrade"
+      href="/upgrade"
+      onClick={(e) => {
+        e.preventDefault();
+        void openHostedPricing().catch(() => alert('Could not open plans — please try again.'));
+      }}
+    >
+      See plans →
+    </a>
+  );
 }
