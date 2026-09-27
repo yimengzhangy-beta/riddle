@@ -46,6 +46,23 @@ const APP_BASE_URL = process.env.APP_BASE_URL ?? 'https://main.d2v99bb7j5etb9.am
  */
 const ALLOWED_ORIGINS = [APP_BASE_URL, 'http://localhost:5173'];
 
+/**
+ * AWS Monetization — the app that holds this game's plans and metrics
+ * (`Riddle Game`, created by the /monetize skill on the ALPHA stage). The
+ * identity is an ARN: the `/sandbox` suffix points every runtime call at the
+ * app's sandbox (fake money, isolated counters); drop the suffix to go live.
+ * The control-plane region/endpoint follow the stage (alpha = us-west-2),
+ * NOT the stack's own region. MONETIZATION_ENFORCE stays 'false' until the
+ * draft plans are published — enforcing before that would deny every player.
+ */
+const MONETIZATION_APP_ARN =
+  'arn:aws:appmonetization:us-west-2:136311627418:app/13598537-a45a-4439-9bab-66bd566c8ef2';
+const MONETIZATION_APP_ID = process.env.MONETIZATION_APP_ID ?? `${MONETIZATION_APP_ARN}/sandbox`;
+const MONETIZATION_REGION = process.env.MONETIZATION_REGION ?? 'us-west-2';
+const MONETIZATION_ENDPOINT =
+  process.env.MONETIZATION_ENDPOINT ?? 'https://us-west-2.alpha.monetization.aws.dev';
+const MONETIZATION_ENFORCE = process.env.MONETIZATION_ENFORCE ?? 'false';
+
 export class AppStack extends cdk.Stack {
   constructor(scope: Construct, id: string, props?: cdk.StackProps) {
     super(scope, id, props);
@@ -137,10 +154,20 @@ export class AppStack extends cdk.Stack {
         ADMIN_GROUP,
         APP_BASE_URL,
         ALLOWED_ORIGINS: ALLOWED_ORIGINS.join(','),
+        MONETIZATION_APP_ID,
+        MONETIZATION_REGION,
+        MONETIZATION_ENDPOINT,
+        MONETIZATION_ENFORCE,
       },
       bundling: {
         // Ship the judge/generation prompt files as inlined strings.
         loader: { '.txt': 'text' },
+        // Bundle @aws-sdk/* instead of using the Lambda runtime's copy. The
+        // AWS Monetization SDK wraps a generated smithy client that is pinned
+        // to its own @aws-sdk/core + @smithy versions; run on the runtime's
+        // copy, its control-plane calls (session minting) come back
+        // AccessDeniedException while the same calls succeed locally.
+        externalModules: [],
       },
     });
 
@@ -157,6 +184,43 @@ export class AppStack extends cdk.Stack {
           'cognito-idp:AdminUpdateUserAttributes',
         ],
         resources: [userPool.userPoolArn],
+      })
+    );
+
+    // Runtime calls the AWS Monetization SDK makes from the handler: entitlement
+    // checks, usage metering, and minting the hosted pricing / billing-portal
+    // sessions.
+    //
+    // `resources: ['*']` is deliberate. Scoping these to the app ARN was
+    // rejected by the service with AccessDeniedException while the same call
+    // under `*` succeeds (verified on a prod deploy). Least privilege is kept
+    // in the action list — these are per-user runtime calls only; nothing here
+    // can create, publish or archive plans/metrics. Both action prefixes are
+    // granted: `monetization:` is what prod authorised on deploy, and
+    // `appmonetization:` is the prefix the alpha stage's ARNs use. Narrow to
+    // one prefix + the app ARNs (live and /sandbox) once the service accepts it.
+    const monetizationActions = [
+      'GetEntitlementDecision',
+      'PutEvent',
+      'PutAwsServiceEvent',
+      'ListPlans',
+      'CreateCheckoutSession',
+      // The current SDK's createPricingSession sends CreateSubscriptionCheckoutSession
+      // (the README still says CreateCheckoutSession) — AccessDenied without it,
+      // verified on the alpha stage. OneTime is its sibling command.
+      'CreateSubscriptionCheckoutSession',
+      'CreateOneTimeCheckoutSession',
+      // The SDK's createBillingPortalSession sends its own command — not
+      // covered by CreateCheckoutSession (verified: AccessDenied without it).
+      'CreateBillingPortalSession',
+      'CancelSubscription',
+      'GetSubscription',
+    ];
+    apiHandler.addToRolePolicy(
+      new iam.PolicyStatement({
+        sid: 'MonetizationAIRuntime',
+        actions: monetizationActions.flatMap((a) => [`monetization:${a}`, `appmonetization:${a}`]),
+        resources: ['*'],
       })
     );
 
@@ -201,6 +265,8 @@ export class AppStack extends cdk.Stack {
     api.addRoutes({ path: '/riddles/{id}/hint', methods: [apigwv2.HttpMethod.POST], integration });
     // Authenticated *and* gated on the `admins` group inside the handler.
     api.addRoutes({ path: '/admin/generate', methods: [apigwv2.HttpMethod.POST], integration });
+    // Billing (AWS Monetization): mints the hosted pricing/portal session URLs.
+    api.addRoutes({ path: '/billing/session', methods: [apigwv2.HttpMethod.GET], integration });
 
     // Steady-state ceiling with headroom above 300 TPS.
     const stage = api.defaultStage!.node.defaultChild as apigwv2.CfnStage;
@@ -352,5 +418,6 @@ export class AppStack extends cdk.Stack {
     new cdk.CfnOutput(this, 'UserPoolId', { value: userPool.userPoolId });
     new cdk.CfnOutput(this, 'UserPoolClientId', { value: userPoolClient.userPoolClientId });
     new cdk.CfnOutput(this, 'AnthropicSecretName', { value: ANTHROPIC_SECRET_NAME });
+    new cdk.CfnOutput(this, 'MonetizationAppId', { value: MONETIZATION_APP_ID });
   }
 }
