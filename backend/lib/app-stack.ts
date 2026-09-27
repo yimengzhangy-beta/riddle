@@ -10,6 +10,12 @@ import * as lambda from 'aws-cdk-lib/aws-lambda';
 import * as logs from 'aws-cdk-lib/aws-logs';
 import * as secretsmanager from 'aws-cdk-lib/aws-secretsmanager';
 import { NodejsFunction } from 'aws-cdk-lib/aws-lambda-nodejs';
+import { config as loadEnv } from 'dotenv';
+
+// AWS Monetization connection + app identity, written by the /monetize skill to
+// the repo-root .env.monetization. dotenv fills only unset keys, so a real env
+// var at synth time (e.g. MONETIZATION_APP_ID=<live ARN> npx cdk deploy) wins.
+loadEnv({ path: ['.env.monetization', '../.env.monetization'], quiet: true });
 
 /**
  * Shared with the co-founder app — created out of band with the AWS CLI so the key
@@ -48,20 +54,22 @@ const ALLOWED_ORIGINS = [APP_BASE_URL, 'http://localhost:5173'];
 
 /**
  * AWS Monetization — the app that holds this game's plans and metrics
- * (`Riddle Game`, created by the /monetize skill on the ALPHA stage). The
- * identity is an ARN: the `/sandbox` suffix points every runtime call at the
- * app's sandbox (fake money, isolated counters); drop the suffix to go live.
- * The control-plane region/endpoint follow the stage (alpha = us-west-2),
- * NOT the stack's own region. MONETIZATION_ENFORCE stays 'false' until the
- * draft plans are published — enforcing before that would deny every player.
+ * (`Riddle 0927`, created by the /monetize skill). MONETIZATION_APP_ID is the
+ * app's live ARN or its sandbox ARN; the SDK derives live vs sandbox from it.
+ * The endpoint/region are the control plane's (us-west-2), NOT this stack's
+ * region — the SDK resolves them from MONETIZATION_ENDPOINT. All four come from
+ * .env.monetization (loaded above) unless overridden in the environment.
  */
-const MONETIZATION_APP_ARN =
-  'arn:aws:appmonetization:us-west-2:136311627418:app/13598537-a45a-4439-9bab-66bd566c8ef2';
-const MONETIZATION_APP_ID = process.env.MONETIZATION_APP_ID ?? `${MONETIZATION_APP_ARN}/sandbox`;
-const MONETIZATION_REGION = process.env.MONETIZATION_REGION ?? 'us-west-2';
-const MONETIZATION_ENDPOINT =
-  process.env.MONETIZATION_ENDPOINT ?? 'https://us-west-2.alpha.monetization.aws.dev';
-const MONETIZATION_ENFORCE = process.env.MONETIZATION_ENFORCE ?? 'false';
+const MONETIZATION_APP_ID = process.env.MONETIZATION_APP_ID ?? '';
+const MONETIZATION_ENDPOINT = process.env.MONETIZATION_ENDPOINT ?? '';
+const MONETIZATION_REGION = process.env.MONETIZATION_REGION ?? '';
+const MONETIZATION_ENFORCE = process.env.MONETIZATION_ENFORCE ?? 'true';
+if (!MONETIZATION_APP_ID || !MONETIZATION_ENDPOINT || !MONETIZATION_REGION) {
+  throw new Error(
+    'MONETIZATION_APP_ID, MONETIZATION_ENDPOINT and MONETIZATION_REGION must be set — ' +
+      'see .env.monetization at the repo root'
+  );
+}
 
 export class AppStack extends cdk.Stack {
   constructor(scope: Construct, id: string, props?: cdk.StackProps) {
@@ -155,19 +163,13 @@ export class AppStack extends cdk.Stack {
         APP_BASE_URL,
         ALLOWED_ORIGINS: ALLOWED_ORIGINS.join(','),
         MONETIZATION_APP_ID,
-        MONETIZATION_REGION,
         MONETIZATION_ENDPOINT,
+        MONETIZATION_REGION,
         MONETIZATION_ENFORCE,
       },
       bundling: {
         // Ship the judge/generation prompt files as inlined strings.
         loader: { '.txt': 'text' },
-        // Bundle @aws-sdk/* instead of using the Lambda runtime's copy. The
-        // AWS Monetization SDK wraps a generated smithy client that is pinned
-        // to its own @aws-sdk/core + @smithy versions; run on the runtime's
-        // copy, its control-plane calls (session minting) come back
-        // AccessDeniedException while the same calls succeed locally.
-        externalModules: [],
       },
     });
 
@@ -189,37 +191,31 @@ export class AppStack extends cdk.Stack {
 
     // Runtime calls the AWS Monetization SDK makes from the handler: entitlement
     // checks, usage metering, and minting the hosted pricing / billing-portal
-    // sessions.
+    // sessions. Per-user runtime actions only — nothing here can create, publish
+    // or archive plans/metrics.
     //
-    // `resources: ['*']` is deliberate. Scoping these to the app ARN was
+    // `resources: ['*']` is deliberate. Scoping to the app ARN and its /sandbox
+    // twin (`arn:aws:appmonetization:us-west-2:<acct>:app/<appId>[/sandbox]`) is
     // rejected by the service with AccessDeniedException while the same call
-    // under `*` succeeds (verified on a prod deploy). Least privilege is kept
-    // in the action list — these are per-user runtime calls only; nothing here
-    // can create, publish or archive plans/metrics. Both action prefixes are
-    // granted: `monetization:` is what prod authorised on deploy, and
-    // `appmonetization:` is the prefix the alpha stage's ARNs use. Narrow to
-    // one prefix + the app ARNs (live and /sandbox) once the service accepts it.
-    const monetizationActions = [
-      'GetEntitlementDecision',
-      'PutEvent',
-      'PutAwsServiceEvent',
-      'ListPlans',
-      'CreateCheckoutSession',
-      // The current SDK's createPricingSession sends CreateSubscriptionCheckoutSession
-      // (the README still says CreateCheckoutSession) — AccessDenied without it,
-      // verified on the alpha stage. OneTime is its sibling command.
-      'CreateSubscriptionCheckoutSession',
-      'CreateOneTimeCheckoutSession',
-      // The SDK's createBillingPortalSession sends its own command — not
-      // covered by CreateCheckoutSession (verified: AccessDenied without it).
-      'CreateBillingPortalSession',
-      'CancelSubscription',
-      'GetSubscription',
-    ];
+    // under `*` succeeds — verified on deploy, twice now (2026-09-16 on the
+    // previous namespace, 2026-09-27 on this one). Least privilege is kept in
+    // the action list. Narrow the resource once the service accepts it.
     apiHandler.addToRolePolicy(
       new iam.PolicyStatement({
         sid: 'MonetizationAIRuntime',
-        actions: monetizationActions.flatMap((a) => [`monetization:${a}`, `appmonetization:${a}`]),
+        actions: [
+          'appmonetization:GetEntitlementDecision',
+          'appmonetization:PutEvent',
+          'appmonetization:PutAwsServiceEvent',
+          'appmonetization:ListPlans',
+          // createPricingSession() sends CreateSubscriptionCheckoutSession (the
+          // no-planId variant); createBillingPortalSession() sends its own op.
+          'appmonetization:CreateSubscriptionCheckoutSession',
+          'appmonetization:CreateCheckoutSession',
+          'appmonetization:CreateBillingPortalSession',
+          'appmonetization:CancelSubscription',
+          'appmonetization:GetSubscription',
+        ],
         resources: ['*'],
       })
     );

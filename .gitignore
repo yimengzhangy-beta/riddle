@@ -9,6 +9,9 @@ cdk.out/
 .env
 .env.*
 !.env.example
+# AWS Monetization runtime config: ARN, endpoint, region, enforce flag — no secrets.
+# Tracked on purpose: the CDK stack reads it at synth, including in GitHub Actions.
+!.env.monetization
 *.pem
 *.key
 *.p12
@@ -21,12 +24,7 @@ credentials
 
 # OS noise
 .DS_Store
-
-# monetize skill local state
 .monetize/
 
-# AWS Monetization runtime config (ids only, but env-specific)
-.env.monetization
-
-# private npm registry auth (token) — configure per machine / CI secret
+# private registry token — never commit
 .npmrc

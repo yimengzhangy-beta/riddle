@@ -353,7 +353,7 @@ function SeePlans() {
       href="/upgrade"
       onClick={(e) => {
         e.preventDefault();
-        void openHostedPricing().catch(() => alert('Could not open plans — please try again.'));
+        void openHostedPricing().catch(() => {});
       }}
     >
       See plans →

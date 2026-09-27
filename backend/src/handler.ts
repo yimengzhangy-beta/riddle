@@ -127,25 +127,25 @@ async function route(event: APIGatewayProxyEventV2WithJWTAuthorizer): Promise<Ro
   // throws on failure, so a metered event always means the action happened.
   if (method === 'GET' && match(segments, ['riddles', 'next'])) {
     const player = playerOf(event);
-    await requireEntitlement(player.userId, 'riddle_played');
+    await requireEntitlement(player.userId, 'play_riddle');
     const result = await riddleRoutes.getNext(player, event.queryStringParameters ?? {});
-    await meter(player.userId, 'riddle_played');
+    await meter(player.userId, 'play_riddle');
     return result;
   }
 
   if (method === 'POST' && match(segments, ['riddles', ':', 'guess'])) {
     const player = playerOf(event);
-    await requireEntitlement(player.userId, 'guess_submitted');
+    await requireEntitlement(player.userId, 'submit_guess');
     const result = await riddleRoutes.postGuess(player, riddleIdOf(event), parseBody(event));
-    await meter(player.userId, 'guess_submitted');
+    await meter(player.userId, 'submit_guess');
     return result;
   }
 
   if (method === 'POST' && match(segments, ['riddles', ':', 'hint'])) {
     const player = playerOf(event);
-    await requireEntitlement(player.userId, 'hint_taken');
+    await requireEntitlement(player.userId, 'take_hint');
     const result = await riddleRoutes.postHint(player, riddleIdOf(event));
-    await meter(player.userId, 'hint_taken');
+    await meter(player.userId, 'take_hint');
     return result;
   }
 

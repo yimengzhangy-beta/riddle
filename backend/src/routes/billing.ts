@@ -4,8 +4,8 @@ import type { RouteResult } from './result';
 
 /**
  * GET /billing/session — mint the hosted pricing + billing-portal session URLs
- * for the signed-in player. The SPA calls this once after sign-in (and again
- * when its cached cookie expires); the URLs embed a short-lived session token.
+ * for the signed-in player. The SPA calls this on each launcher click; the URLs
+ * embed a short-lived session token, so they are not cached.
  */
 export async function getSession(player: Player, origin: string): Promise<RouteResult> {
   const session = await mintPortalSessions(player.userId, origin);

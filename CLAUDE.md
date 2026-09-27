@@ -44,7 +44,7 @@ template, e.g. `/riddles/{id}/guess`).
 | `db_write` | each DynamoDB write | `op`, `pk`, `sk`, `counters[]`, `written` — **the key only, never the item** |
 | `guess_resolved` | end of a guess | `riddleId`, `resolution`, `verdict`, `solved`, `guessNumber`, `hintsTaken` |
 | `response` | handler exit | `status`, `durationMs` |
-| `billing` | each entitlement check / metered event (AWS Monetization) | `action` (`riddle_played` \| `guess_submitted` \| `hint_taken`), `op` (`entitlement` \| `meter`), `decision`, `code` (e.g. `NO_SUBSCRIPTION`, `QUOTA_EXCEEDED`), `planId` — **never plan names or amounts** |
+| `billing` | each entitlement check / metered event (AWS Monetization) | `action` (`play_riddle` \| `submit_guess` \| `take_hint`), `op` (`entitlement` \| `meter`), `decision`, `code` (e.g. `NO_SUBSCRIPTION`, `QUOTA_EXCEEDED`), `planId` — **never plan names or amounts** |
 | `error` | operational failure | `where`, `name`, `message` (literal), `frames` |
 
 **Most guesses produce no `llm_call` at all.** The normalisation fast path in

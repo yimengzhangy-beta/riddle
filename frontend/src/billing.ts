@@ -4,10 +4,9 @@ import { getBillingSession } from './api';
  * Launchers for the MonetizationAI-hosted pricing page and billing portal.
  *
  * The app builds neither page. Each launcher click mints a FRESH session URL
- * (GET /billing/session) and redirects to it. We deliberately do NOT cache the
- * URL: the session token embedded in it is short-lived and platform-managed, so
- * a cached URL goes stale and the hosted page 403s ("Couldn't load pricing").
- * Minting is one cheap call — always mint on click.
+ * (GET /billing/session) and redirects to it. The URL is deliberately not
+ * cached: the session token embedded in it is short-lived and platform-managed,
+ * so a stale URL makes the hosted page fail to load. Minting is one cheap call.
  */
 
 /** Top-level redirect to the hosted plan-selection page. */

@@ -122,9 +122,10 @@ export function logGuessResolved(fields: {
 }
 
 /**
- * One line per billing decision. `decision` is ALLOW / DENY (entitlement) or
- * RECORDED (metering); `code` is the platform's reason code (NO_SUBSCRIPTION,
- * QUOTA_EXCEEDED, …). Ids and enums only — no plan names, no amounts.
+ * One line per billing decision (AWS Monetization). `decision` is ALLOW / DENY
+ * (entitlement) or RECORDED (metering); `code` is the platform's reason code
+ * (NO_SUBSCRIPTION, QUOTA_EXCEEDED, …). Ids and enums only — no plan names, no
+ * amounts.
  */
 export function logBilling(fields: {
   action: string;
