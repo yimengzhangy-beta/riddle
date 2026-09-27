@@ -1,9 +1,10 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 /**
- * Smoke test for the hosted-session mint (the SPA's "login hook" equivalent):
- * both sessions minted with return URLs + TTL, and an empty userId mints
- * nothing. The SDK accessor is mocked — no real MonetizationAI is constructed.
+ * Smoke test for the hosted-session mint behind GET /billing/session: both
+ * sessions are minted with return URLs for a signed-in player, and an empty
+ * userId mints nothing. The SDK accessor is mocked — no real MonetizationAI is
+ * constructed (its constructor requires an appId the test env does not have).
  */
 
 const createPricingSession = vi
@@ -18,13 +19,19 @@ vi.mock('../billing/client', () => ({
 }));
 
 import { mintPortalSessions } from '../billing';
+import { getSession } from '../routes/billing';
 
-describe('mintPortalSessions', () => {
+describe('GET /billing/session', () => {
   beforeEach(() => vi.clearAllMocks());
 
   it('mints both sessions and returns both URLs for a signed-in player', async () => {
-    const out = await mintPortalSessions('user-123', 'https://app.example');
+    const res = await getSession({ userId: 'user-123', email: 'p@example.com' }, 'https://app.example');
 
+    expect(res.status).toBe(200);
+    expect(res.body).toEqual({
+      pricingUrl: 'https://host/pricing#token=p',
+      billingPortalUrl: 'https://host/billing-portal#token=b',
+    });
     expect(createPricingSession).toHaveBeenCalledWith(
       'user-123',
       expect.objectContaining({
@@ -32,12 +39,10 @@ describe('mintPortalSessions', () => {
         refreshUrl: expect.any(String),
       })
     );
-    expect(createBillingPortalSession).toHaveBeenCalledWith('user-123', expect.any(Object));
-    expect(out).toEqual({
-      pricingUrl: 'https://host/pricing#token=p',
-      billingPortalUrl: 'https://host/billing-portal#token=b',
-      expiresInSeconds: expect.any(Number),
-    });
+    expect(createBillingPortalSession).toHaveBeenCalledWith(
+      'user-123',
+      expect.objectContaining({ returnUrl: expect.any(String), refreshUrl: expect.any(String) })
+    );
   });
 
   it('throws and mints nothing when userId is empty', async () => {

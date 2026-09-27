@@ -143,8 +143,6 @@ export const takeHint = (riddleId: string) =>
 export interface BillingSession {
   pricingUrl: string;
   billingPortalUrl: string;
-  expiresInSeconds: number;
 }
 
-export const getBillingSession = () =>
-  request<BillingSession>('/billing/session', { auth: true });
+export const getBillingSession = () => request<BillingSession>('/billing/session', { auth: true });

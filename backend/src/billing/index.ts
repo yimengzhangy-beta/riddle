@@ -11,14 +11,8 @@ import { getMonetize } from './client';
  * QUOTA_EXCEEDED) is a normal answer, not an error, and always blocks.
  */
 
-export type BillableAction = 'riddle_played' | 'guess_submitted' | 'hint_taken';
-
-/**
- * How long the SPA may cache the minted hosted-session URLs. The token's real
- * TTL is platform-managed; this only bounds the cookie cache, and an expired
- * URL just re-mints on the next launcher click.
- */
-const SESSION_CACHE_SECONDS = 60 * 60;
+/** Must match each metric's sourceEventType on the AWS Monetization app. */
+export type BillableAction = 'play_riddle' | 'submit_guess' | 'take_hint';
 
 /** MONETIZATION_ENFORCE=false keeps every route open (e.g. while plans are drafts). */
 function enforcing(): boolean {
@@ -34,6 +28,16 @@ export class EntitlementDeniedError extends Error {
   }
 }
 
+/** The platform's reason code, whichever shape the SDK returns it in. */
+function reasonCode(reason: unknown): string | undefined {
+  if (typeof reason === 'string') return reason;
+  if (reason && typeof reason === 'object' && 'code' in reason) {
+    const code = (reason as { code?: unknown }).code;
+    return typeof code === 'string' ? code : undefined;
+  }
+  return undefined;
+}
+
 /**
  * Gate a billable action BEFORE its paid work, so a denied request costs
  * nothing. Throws EntitlementDeniedError on DENY; anything operational is
@@ -43,14 +47,12 @@ export async function requireEntitlement(userId: string, action: BillableAction)
   if (!enforcing()) return;
 
   let decision: string;
-  let reason: string | undefined;
+  let code: string | undefined;
   let planId: string | null;
   try {
     const ent = await getMonetize().checkEntitlement(userId, { eventType: action });
-    decision = ent.decision;
-    // `reason` is a code string on current SDKs; older builds wrapped it in an object.
-    const r: unknown = ent.reason;
-    reason = typeof r === 'string' ? r : ((r as { code?: string } | undefined)?.code ?? undefined);
+    decision = ent.decision ?? 'UNKNOWN';
+    code = reasonCode(ent.reason);
     planId = ent.planId ?? null;
   } catch (err) {
     logError({
@@ -62,9 +64,9 @@ export async function requireEntitlement(userId: string, action: BillableAction)
     return;
   }
 
-  logBilling({ action, op: 'entitlement', decision, code: reason, planId });
+  logBilling({ action, op: 'entitlement', decision, code, planId });
   if (decision === 'DENY') {
-    throw new EntitlementDeniedError(action, reason ?? 'NOT_ENTITLED');
+    throw new EntitlementDeniedError(action, code ?? 'NOT_ENTITLED');
   }
 }
 
@@ -88,45 +90,27 @@ export async function meter(userId: string, action: BillableAction): Promise<voi
 
 /**
  * Mint the hosted pricing + billing-portal sessions for a signed-in player.
- * The SPA stores the returned URLs in cookies on its own origin and redirects
- * to them from its "Upgrade" / "Manage subscription" launchers — the app never
- * builds those pages, MonetizationAI hosts them.
+ * The SPA redirects to whichever it needs from its "Upgrade" / "Manage
+ * subscription" launchers — the app never builds those pages, MonetizationAI
+ * hosts them. The URLs carry short-lived tokens, so the SPA mints per click.
  */
 export async function mintPortalSessions(
   userId: string,
   origin: string
-): Promise<{ pricingUrl: string; billingPortalUrl: string; expiresInSeconds: number }> {
+): Promise<{ pricingUrl: string; billingPortalUrl: string }> {
   if (!userId) throw new Error('mintPortalSessions: userId is required');
 
   const m = getMonetize();
-  // Label which mint failed (the error class and frames carry no content), so
-  // an outage of one hosted page is distinguishable from the other in the log.
-  const labelled = <T>(where: string, p: Promise<T>): Promise<T> =>
-    p.catch((err: unknown) => {
-      logError({
-        where,
-        name: err instanceof Error ? err.name : typeof err,
-        message: 'hosted session mint failed',
-        frames: stackFrames(err),
-      });
-      throw err;
-    });
   const [{ pricingUrl }, { billingPortalUrl }] = await Promise.all([
-    labelled(
-      'billing.pricingSession',
-      m.createPricingSession(userId, {
-        returnUrl: `${origin}/?checkout=success`,
-        refreshUrl: `${origin}/?checkout=expired`,
-      })
-    ),
-    labelled(
-      'billing.portalSession',
-      m.createBillingPortalSession(userId, {
-        returnUrl: `${origin}/`,
-        refreshUrl: `${origin}/?portal=expired`,
-      })
-    ),
+    m.createPricingSession(userId, {
+      returnUrl: `${origin}/?checkout=success`,
+      refreshUrl: `${origin}/?checkout=expired`,
+    }),
+    m.createBillingPortalSession(userId, {
+      returnUrl: `${origin}/`,
+      refreshUrl: `${origin}/?portal=expired`,
+    }),
   ]);
 
-  return { pricingUrl, billingPortalUrl, expiresInSeconds: SESSION_CACHE_SECONDS };
+  return { pricingUrl, billingPortalUrl };
 }

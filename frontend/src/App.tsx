@@ -125,16 +125,15 @@ function Header({
               Play
             </a>
           )}
-          {/* Hosted by MonetizationAI — these launchers redirect to the hosted
-              pricing page / billing portal; the app builds neither. */}
+          {/* Hosted by MonetizationAI — these launchers mint a session and
+              redirect to the hosted pricing page / billing portal; the app
+              builds neither. */}
           {signedIn && (
             <a
               href="/upgrade"
               onClick={(e) => {
                 e.preventDefault();
-                void openHostedPricing().catch(() =>
-                  alert('Could not open plans — please try again.')
-                );
+                void openHostedPricing().catch(() => {});
               }}
             >
               Upgrade
@@ -145,9 +144,7 @@ function Header({
               href="/subscription"
               onClick={(e) => {
                 e.preventDefault();
-                void openHostedPortal().catch(() =>
-                  alert('Could not open your subscription — please try again.')
-                );
+                void openHostedPortal().catch(() => {});
               }}
             >
               Manage subscription
