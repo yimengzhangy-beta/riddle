@@ -9,6 +9,8 @@ cdk.out/
 .env
 .env.*
 !.env.example
+# AWS Monetization ids/endpoint only (no secrets) — the CDK stack reads it at synth
+!.env.monetization
 *.pem
 *.key
 *.p12
@@ -21,3 +23,4 @@ credentials
 
 # OS noise
 .DS_Store
+.monetize/

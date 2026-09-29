@@ -24,6 +24,11 @@ export class ApiError extends Error {
   ) {
     super(typeof body.error === 'string' ? body.error : `Request failed (${status})`);
   }
+
+  /** True on a 403 from a billable action: the plan doesn't allow it — offer plans. */
+  get planDenied(): boolean {
+    return this.status === 403 && this.body.decision === 'DENY';
+  }
 }
 
 async function request<T>(
@@ -131,3 +136,15 @@ export const takeHint = (riddleId: string) =>
     auth: true,
     method: 'POST',
   });
+
+// ------------------------------------------------------------------ billing
+
+/** Short-lived URLs for the MonetizationAI-hosted pricing page and billing portal. */
+export interface BillingSession {
+  pricingUrl: string;
+  billingPortalUrl: string;
+  expiresInSeconds: number;
+}
+
+export const getBillingSession = () =>
+  request<BillingSession>('/billing/session', { auth: true });

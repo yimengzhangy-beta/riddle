@@ -114,6 +114,39 @@ request.
 
 ---
 
+## Billing (AWS Monetization)
+
+Plans, metering and the customer-facing pricing page / billing portal run on AWS
+Monetization (app `Riddle 0928`, id `4204a937-782b-4cd1-a303-5de1417b3a5e`). The
+runtime config lives in the committed repo-root `.env.monetization`; the stack reads it
+at synth time and passes it to the Lambda.
+
+| Plan | Price | Riddles | Hints | AI-judged guesses |
+| ---- | ----- | ------- | ----- | ----------------- |
+| Free | $0 | 15/mo | 15/mo | 22/mo |
+| Solver | $4.99/mo | 150/mo | 150/mo | 225/mo |
+| Master | $9.99/mo | unlimited | 500/mo | 1,000/mo, then $0.02 each |
+
+- **What is metered:** `GET /riddles/next` → `riddle_played`, `POST …/hint` → `hint_taken`,
+  and `POST …/guess` → `guess_judged` **only when the guess reaches Claude** — an exact
+  match is settled by normalisation and is free.
+- **Enforcement:** the handler checks the player's entitlement before each paid step and
+  answers `403 { decision: "DENY", reason, action }` when the plan does not cover it; the
+  SPA offers the hosted pricing page. A brand-new player has no plan and is denied until
+  they pick one (Free included) on that page. Set `MONETIZATION_ENFORCE=false` to keep
+  the routes open while verifying metering. A billing-service *error* fails open.
+- **Sandbox vs live:** `MONETIZATION_APP_ID` is an ARN; the `/sandbox` suffix selects the
+  sandbox (test card `4242 4242 4242 4242`, nothing charged). Swap the commented line
+  in `.env.monetization` and redeploy, or run `/monetize live`.
+- **Hosted pages:** `GET /billing/session` mints short-lived URLs for the hosted pricing
+  page and billing portal; the SPA's *Upgrade* / *Manage subscription* links redirect to
+  them. The app builds neither page.
+- **Private registry:** `backend/.npmrc` points the `@aws-app-monetization` scope at the
+  private registry and reads the token from `MONETIZATION_REGISTRY_TOKEN` — export it
+  before `npm install` (locally and in the deploy workflow).
+
+Console: https://us-west-2.console.aws.amazon.com/monetization/products/4204a937-782b-4cd1-a303-5de1417b3a5e?region=us-west-2
+
 ## Observability
 
 Every request writes a structured JSON audit trail. All events of one request share

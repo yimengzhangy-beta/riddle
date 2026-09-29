@@ -125,10 +125,24 @@ export interface GuessResult {
   exactMatch: boolean;
 }
 
+/**
+ * Hooks around the one paid step of a guess — the model judgment. The engine
+ * knows nothing about billing; the handler supplies these so a non-exact guess
+ * can be gated before the model runs and counted once it has. Neither fires on
+ * the exact-match fast path, which costs nothing.
+ */
+export interface GuessHooks {
+  /** Runs before the model is asked. Throw to refuse the judgment. */
+  beforeJudge?: () => Promise<void>;
+  /** Runs after the model returned a usable verdict (not on the fallback path). */
+  afterJudge?: () => Promise<void>;
+}
+
 export async function submitGuess(args: {
   player: Player;
   riddleId: string;
   guess: string;
+  hooks?: GuessHooks;
 }): Promise<GuessResult> {
   const { riddle, attempt } = await loadAttempt(args.player, args.riddleId);
 
@@ -142,9 +156,11 @@ export async function submitGuess(args: {
   const exactMatch = isExactMatch(args.guess, riddle.answer);
 
   let judged: JudgedGuess;
+  let judgedByModel = false;
   if (exactMatch) {
     judged = { verdict: 'correct', reason: 'Exactly right.' };
   } else {
+    await args.hooks?.beforeJudge?.();
     try {
       judged = await judgeGuess({
         system: judgeSystemPrompt(),
@@ -156,6 +172,7 @@ export async function submitGuess(args: {
         }),
         buildRetry: retryNudge,
       });
+      judgedByModel = true;
     } catch (err) {
       if (!(err instanceof ModelOutputError)) throw err;
       // The judge is the only thing that can turn a non-exact guess into a solve.
@@ -167,6 +184,7 @@ export async function submitGuess(args: {
         reason: 'That is not the answer.',
       };
     }
+    if (judgedByModel) await args.hooks?.afterJudge?.();
   }
 
   const solved = judged.verdict === 'correct';

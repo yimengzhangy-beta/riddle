@@ -1,4 +1,4 @@
-import type { Player } from '../engine/riddles';
+import type { GuessHooks, Player } from '../engine/riddles';
 import { nextRiddle, submitGuess, takeHint } from '../engine/riddles';
 import { requireDifficulty, requireString } from './input';
 import type { RouteResult } from './result';
@@ -15,14 +15,20 @@ export async function getNext(
   return { status: 200, body: result };
 }
 
-/** POST /riddles/{id}/guess — body: { guess } */
+/**
+ * POST /riddles/{id}/guess — body: { guess }
+ *
+ * `hooks` is passed through untouched to the engine, which fires them around the
+ * model judgment (see GuessHooks). The route itself stays billing-unaware.
+ */
 export async function postGuess(
   player: Player,
   riddleId: string,
-  body: Record<string, unknown>
+  body: Record<string, unknown>,
+  hooks?: GuessHooks
 ): Promise<RouteResult> {
   const guess = requireString(body, 'guess', 500);
-  const result = await submitGuess({ player, riddleId, guess });
+  const result = await submitGuess({ player, riddleId, guess, hooks });
   return { status: 200, body: result };
 }
 
