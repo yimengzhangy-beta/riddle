@@ -137,7 +137,7 @@ at synth time and passes it to the Lambda.
   the routes open while verifying metering. A billing-service *error* fails open.
 - **Sandbox vs live:** `MONETIZATION_APP_ID` is an ARN; the `/sandbox` suffix selects the
   sandbox (test card `4242 4242 4242 4242`, nothing charged). The plans were published on
-  2026-09-29; the app currently points at the **sandbox**. Swap the commented line in
+  2026-09-29; the app currently points at **live**. Swap the commented line in
   `.env.monetization` and redeploy, or run `/monetize live` / `/monetize sandbox`.
 - **Hosted pages:** `GET /billing/session` mints short-lived URLs for the hosted pricing
   page and billing portal; the SPA's *Upgrade* / *Manage subscription* links redirect to
