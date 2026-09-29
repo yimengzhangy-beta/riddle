@@ -125,7 +125,7 @@ at synth time and passes it to the Lambda.
 | ---- | ----- | ------- | ----- | ----------------- |
 | Free | $0 | 15/mo | 15/mo | 22/mo |
 | Solver | $4.99/mo | 150/mo | 150/mo | 225/mo |
-| Master | $9.99/mo | unlimited | 500/mo | 1,000/mo, then $0.02 each |
+| Master | $9.99/mo | unlimited | 500/mo | 1,000/mo, then $0.02 each, capped at $100/mo of overage |
 
 - **What is metered:** `GET /riddles/next` → `riddle_played`, `POST …/hint` → `hint_taken`,
   and `POST …/guess` → `guess_judged` **only when the guess reaches Claude** — an exact
@@ -136,8 +136,9 @@ at synth time and passes it to the Lambda.
   they pick one (Free included) on that page. Set `MONETIZATION_ENFORCE=false` to keep
   the routes open while verifying metering. A billing-service *error* fails open.
 - **Sandbox vs live:** `MONETIZATION_APP_ID` is an ARN; the `/sandbox` suffix selects the
-  sandbox (test card `4242 4242 4242 4242`, nothing charged). Swap the commented line
-  in `.env.monetization` and redeploy, or run `/monetize live`.
+  sandbox (test card `4242 4242 4242 4242`, nothing charged). The app currently points at
+  **live**; the plans were published on 2026-09-29. Swap the commented line in
+  `.env.monetization` and redeploy to go back to the sandbox, or run `/monetize sandbox`.
 - **Hosted pages:** `GET /billing/session` mints short-lived URLs for the hosted pricing
   page and billing portal; the SPA's *Upgrade* / *Manage subscription* links redirect to
   them. The app builds neither page.
