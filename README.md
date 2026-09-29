@@ -136,9 +136,9 @@ at synth time and passes it to the Lambda.
   they pick one (Free included) on that page. Set `MONETIZATION_ENFORCE=false` to keep
   the routes open while verifying metering. A billing-service *error* fails open.
 - **Sandbox vs live:** `MONETIZATION_APP_ID` is an ARN; the `/sandbox` suffix selects the
-  sandbox (test card `4242 4242 4242 4242`, nothing charged). The app currently points at
-  **live**; the plans were published on 2026-09-29. Swap the commented line in
-  `.env.monetization` and redeploy to go back to the sandbox, or run `/monetize sandbox`.
+  sandbox (test card `4242 4242 4242 4242`, nothing charged). The plans were published on
+  2026-09-29; the app currently points at the **sandbox**. Swap the commented line in
+  `.env.monetization` and redeploy, or run `/monetize live` / `/monetize sandbox`.
 - **Hosted pages:** `GET /billing/session` mints short-lived URLs for the hosted pricing
   page and billing portal; the SPA's *Upgrade* / *Manage subscription* links redirect to
   them. The app builds neither page.
