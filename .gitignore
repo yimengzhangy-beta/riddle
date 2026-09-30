@@ -9,6 +9,11 @@ cdk.out/
 .env
 .env.*
 !.env.example
+# AWS Monetization runtime config — ids and endpoint only, no secrets; the CDK
+# stack reads it at synth, so it must be committed for CI.
+!.env.monetization
+# private-registry auth token for @aws-app-monetization — never commit
+.npmrc
 *.pem
 *.key
 *.p12
@@ -21,3 +26,4 @@ credentials
 
 # OS noise
 .DS_Store
+.monetize/

@@ -44,6 +44,7 @@ template, e.g. `/riddles/{id}/guess`).
 | `db_write` | each DynamoDB write | `op`, `pk`, `sk`, `counters[]`, `written` — **the key only, never the item** |
 | `guess_resolved` | end of a guess | `riddleId`, `resolution`, `verdict`, `solved`, `guessNumber`, `hintsTaken` |
 | `response` | handler exit | `status`, `durationMs` |
+| `billing` | each entitlement check / metered event (AWS Monetization) | `action` (`play_riddle` \| `submit_guess` \| `take_hint`), `op` (`entitlement` \| `meter`), `decision`, `code` (e.g. `NO_SUBSCRIPTION`, `QUOTA_EXCEEDED`), `planId` — **never plan names or amounts** |
 | `error` | operational failure | `where`, `name`, `message` (literal), `frames` |
 
 **Most guesses produce no `llm_call` at all.** The normalisation fast path in
@@ -74,6 +75,12 @@ llm-judged vs normalized guesses, token spend by user, and rejected before the l
 ## Layout rules
 
 - `db/` is the only place that talks to DynamoDB; `llm/` is the only place that knows
-  Claude exists; `routes/` parse and validate input and never touch either.
+  Claude exists; `billing/` is the only place that knows AWS Monetization exists;
+  `routes/` parse and validate input and never touch any of them.
 - `engine/scoring.ts` stays pure — no IO, no clock beyond what the caller passes in.
 - Errors thrown by the engine map to HTTP status in `handler.ts` and nowhere else.
+- Billable actions (`GET /riddles/next`, `POST …/guess`, `POST …/hint`) are gated and
+  metered in `handler.ts` only: `requireEntitlement` before the paid work, `meter` after
+  it succeeds. The pricing page and billing portal are MonetizationAI-hosted — the SPA
+  only mints session URLs via `GET /billing/session` and redirects. The app identity
+  lives in the repo-root `.env.monetization` (`/sandbox` ARN = sandbox, bare ARN = live).

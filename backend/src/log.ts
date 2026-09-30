@@ -122,6 +122,21 @@ export function logGuessResolved(fields: {
 }
 
 /**
+ * One line per billing decision. `decision` is ALLOW / DENY (entitlement) or
+ * RECORDED (metering); `code` is the platform's reason code (NO_SUBSCRIPTION,
+ * QUOTA_EXCEEDED, …). Ids and enums only — no plan names, no amounts.
+ */
+export function logBilling(fields: {
+  action: string;
+  op: 'entitlement' | 'meter';
+  decision: string;
+  code?: string;
+  planId?: string | null;
+}): void {
+  emit('billing', fields);
+}
+
+/**
  * An operational failure. Only the error class and a message this codebase
  * controls — never a message built from request or model text.
  */
