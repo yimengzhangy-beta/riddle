@@ -9,6 +9,7 @@ cdk.out/
 .env
 .env.*
 !.env.example
+!.env.monetization
 *.pem
 *.key
 *.p12
@@ -21,3 +22,6 @@ credentials
 
 # OS noise
 .DS_Store
+
+# monetize skill local state
+.monetize/
