@@ -9,6 +9,7 @@ cdk.out/
 .env
 .env.*
 !.env.example
+# .env.monetization holds app ids + the endpoint only (no secrets); the CDK stack reads it at synth.
 !.env.monetization
 *.pem
 *.key
@@ -23,5 +24,5 @@ credentials
 # OS noise
 .DS_Store
 
-# monetize skill local state
+# monetize skill run state
 .monetize/

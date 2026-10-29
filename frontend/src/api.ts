@@ -24,11 +24,6 @@ export class ApiError extends Error {
   ) {
     super(typeof body.error === 'string' ? body.error : `Request failed (${status})`);
   }
-
-  /** True on a 403 from a billable action: the plan doesn't allow it — offer plans. */
-  get planDenied(): boolean {
-    return this.status === 403 && this.body.decision === 'DENY';
-  }
 }
 
 async function request<T>(
@@ -137,14 +132,17 @@ export const takeHint = (riddleId: string) =>
     method: 'POST',
   });
 
-// ------------------------------------------------------------------ billing
+// ------------------------------------------------------------- monetization
 
-/** Short-lived URLs for the MonetizationAI-hosted pricing page and billing portal. */
-export interface BillingSession {
-  pricingUrl: string;
-  billingPortalUrl: string;
-  expiresInSeconds: number;
+/** A session for a MonetizationAI-hosted page: where to redirect, and until when. */
+export interface HostedSession {
+  url: string;
+  /** ISO-8601, or null when the service did not say. */
+  expiresAt: string | null;
 }
 
-export const getBillingSession = () =>
-  request<BillingSession>('/billing/session', { auth: true });
+export const mintPricingSession = () =>
+  request<HostedSession>('/monetization/pricing-session', { auth: true, method: 'POST' });
+
+export const mintBillingPortalSession = () =>
+  request<HostedSession>('/monetization/billing-portal-session', { auth: true, method: 'POST' });

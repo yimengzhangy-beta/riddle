@@ -121,19 +121,30 @@ export function logGuessResolved(fields: {
   emit('guess_resolved', fields);
 }
 
+/** One call to AWS Monetization. Enum values, codes and timings only. */
+export type MonetizationOp =
+  | 'entitlement'
+  | 'usage'
+  | 'flush'
+  | 'pricing_session'
+  | 'billing_portal_session';
+
 /**
- * One line per billing decision. `decision` is ALLOW / DENY (entitlement) or
- * RECORDED (metering); `code` is the platform's reason code (NO_SUBSCRIPTION,
- * QUOTA_EXCEEDED, …). Ids and enums only — no plan names, no amounts.
+ * An entitlement check, a usage event, a flush, or a hosted-session mint.
+ * `eventType` is the billable action name and `reason` the service's reason
+ * code (NO_SUBSCRIPTION, QUOTA_EXCEEDED, …) — both enums, never player content.
  */
-export function logBilling(fields: {
-  action: string;
-  op: 'entitlement' | 'meter';
-  decision: string;
-  code?: string;
-  planId?: string | null;
+export function logMonetization(fields: {
+  op: MonetizationOp;
+  eventType?: string;
+  decision?: 'ALLOW' | 'DENY';
+  reason?: string;
+  ok: boolean;
+  durationMs: number;
+  /** The error class name only. */
+  error?: string;
 }): void {
-  emit('billing', fields);
+  emit('monetization', fields);
 }
 
 /**

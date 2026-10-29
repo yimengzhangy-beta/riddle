@@ -1,7 +1,13 @@
+import { ManagePlan, ManageSubscription } from '@aws-app-monetization/sdk/react';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { getMe } from './api';
-import { clearBillingCookies, openHostedPortal, openHostedPricing } from './billing';
 import { isSignedIn, signOut } from './cognito';
+import {
+  clearMonetizationSessionCookies,
+  refreshBillingPortalSession,
+  refreshPricingSession,
+  setMonetizationSessionCookies,
+} from './monetization';
 import Auth from './pages/Auth';
 import Play from './pages/Play';
 import { navigate, usePath } from './router';
@@ -13,6 +19,15 @@ interface Stats {
 
 /** Routes a signed-out visitor can still reach. None yet — everything is behind auth. */
 const PUBLIC_PATHS: string[] = [];
+
+/**
+ * Login hook: pre-mint the hosted pricing and billing-portal sessions so the
+ * launchers open instantly. Never blocks sign-in — if it fails, a launcher simply
+ * mints on click instead.
+ */
+function primeMonetization(): void {
+  void setMonetizationSessionCookies().catch(() => {});
+}
 
 export default function App() {
   const path = usePath();
@@ -36,8 +51,8 @@ export default function App() {
   }, [signedIn, loadStats]);
 
   function leave() {
-    clearBillingCookies();
     signOut();
+    clearMonetizationSessionCookies();
     setSignedIn(false);
     navigate('/');
   }
@@ -54,7 +69,12 @@ export default function App() {
       />
       <main>
         {!signedIn && needsAuth ? (
-          <Auth onDone={() => setSignedIn(true)} />
+          <Auth
+            onDone={() => {
+              setSignedIn(true);
+              primeMonetization();
+            }}
+          />
         ) : (
           <Play onStats={setStats} />
         )}
@@ -126,32 +146,19 @@ function Header({
               Play
             </a>
           )}
-          {/* Hosted by MonetizationAI — these launchers redirect to the hosted
-              pricing page / billing portal; the app builds neither. */}
-          {signedIn && (
-            <a
-              href="/upgrade"
-              onClick={(e) => {
-                e.preventDefault();
-                void openHostedPricing().catch(() => {});
-              }}
-            >
-              Upgrade
-            </a>
-          )}
-          {signedIn && (
-            <a
-              href="/subscription"
-              onClick={(e) => {
-                e.preventDefault();
-                void openHostedPortal().catch(() => {});
-              }}
-            >
-              Manage subscription
-            </a>
-          )}
           {signedIn && (
             <>
+              {/* Hosted pricing page: plans, checkout, upgrades. */}
+              <ManagePlan variant="link" onCreatePricingSession={refreshPricingSession}>
+                Upgrade
+              </ManagePlan>
+              {/* Hosted billing portal: current plan, usage, invoices, cancel. */}
+              <ManageSubscription
+                variant="link"
+                onCreateBillingPortalSession={refreshBillingPortalSession}
+              >
+                Manage subscription
+              </ManageSubscription>
               <a
                 href="/"
                 onClick={(e) => {

@@ -11,6 +11,9 @@ applications:
             # @esbuild/netbsd-arm64 on the Linux runner and dies with
             # EBADPLATFORM. `npm install` resolves platform support at install
             # time and skips the ones that do not apply.
+            # @aws-app-monetization/sdk comes from a private registry: set
+            # MONETIZATION_REGISTRY_TOKEN as an Amplify environment variable
+            # (frontend/.npmrc references it).
             - npm install --no-audit --no-fund
         build:
           commands:

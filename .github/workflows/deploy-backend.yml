@@ -36,6 +36,10 @@ jobs:
 
       - name: Install dependencies
         working-directory: backend
+        env:
+          # Token for the private registry that serves @aws-app-monetization/sdk
+          # (backend/.npmrc references it). Add it as a repository secret.
+          MONETIZATION_REGISTRY_TOKEN: ${{ secrets.MONETIZATION_REGISTRY_TOKEN }}
         run: npm ci
 
       - name: CDK deploy

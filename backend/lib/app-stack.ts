@@ -1,3 +1,5 @@
+import * as fs from 'fs';
+import * as path from 'path';
 import * as cdk from 'aws-cdk-lib';
 import { Construct } from 'constructs';
 import * as cognito from 'aws-cdk-lib/aws-cognito';
@@ -10,8 +12,6 @@ import * as lambda from 'aws-cdk-lib/aws-lambda';
 import * as logs from 'aws-cdk-lib/aws-logs';
 import * as secretsmanager from 'aws-cdk-lib/aws-secretsmanager';
 import { NodejsFunction } from 'aws-cdk-lib/aws-lambda-nodejs';
-import { config as loadEnv } from 'dotenv';
-import * as path from 'path';
 
 /**
  * Shared with the co-founder app — created out of band with the AWS CLI so the key
@@ -49,22 +49,40 @@ const APP_BASE_URL = process.env.APP_BASE_URL ?? 'https://main.d2v99bb7j5etb9.am
 const ALLOWED_ORIGINS = [APP_BASE_URL, 'http://localhost:5173'];
 
 /**
- * AWS Monetization — the app that holds this game's plans and metrics ("Riddle
- * 1008", created by the /monetize skill). The identity, endpoint and region come
- * from the repo-root `.env.monetization` the skill wrote (committed — it holds
- * ids only, no secrets); real env vars at synth time override it. The control
- * plane region is the SDK's, NOT the stack's region.
- *
- * MONETIZATION_APP_ID is an ARN: the live app's, or the same with `/sandbox`
- * appended to run every billing call against the app's sandbox (fake money,
- * isolated counters). Swap which line is active in .env.monetization and redeploy.
+ * AWS Monetization: app identity, control-plane endpoint and the enforcement
+ * flag, read at synth time from the committed repo-root `.env.monetization` (no
+ * secrets in it). `MONETIZATION_APP_ID` is the sandbox ARN while testing and the
+ * live ARN once published — swap the active line in that file and redeploy.
  */
-loadEnv({ path: path.resolve(__dirname, '../../.env.monetization') });
-const MONETIZATION_APP_ID = process.env.MONETIZATION_APP_ID ?? '';
-const MONETIZATION_ENDPOINT = process.env.MONETIZATION_ENDPOINT ?? '';
-const MONETIZATION_REGION = process.env.MONETIZATION_REGION ?? '';
-/** 'false' keeps every billable route open (e.g. while wiring metering). Anything else enforces. */
-const MONETIZATION_ENFORCE = process.env.MONETIZATION_ENFORCE ?? 'true';
+const MONETIZATION_ENV = readMonetizationEnv();
+
+function readMonetizationEnv(): Record<string, string> {
+  const file = path.resolve(__dirname, '..', '..', '.env.monetization');
+  const out: Record<string, string> = {};
+  if (!fs.existsSync(file)) return out;
+  for (const line of fs.readFileSync(file, 'utf8').split('\n')) {
+    const m = line.match(/^\s*([A-Z0-9_]+)\s*=\s*(\S*)/);
+    if (m) out[m[1]] = m[2];
+  }
+  return out;
+}
+
+/**
+ * The runtime calls the handler makes to AWS Monetization: entitlement checks,
+ * usage events, and the hosted pricing-page / billing-portal sessions.
+ * `Resource` is `*` for now — the service does not yet authorize on the app ARN.
+ */
+const MONETIZATION_RUNTIME_ACTIONS = [
+  'appmonetization:GetEntitlementDecision',
+  'appmonetization:PutEvent',
+  'appmonetization:PutAwsServiceEvent',
+  'appmonetization:ListPlans',
+  'appmonetization:CreateSubscriptionCheckoutSession',
+  'appmonetization:CreateOneTimeCheckoutSession',
+  'appmonetization:CreateBillingPortalSession',
+  'appmonetization:CancelSubscription',
+  'appmonetization:GetSubscription',
+];
 
 export class AppStack extends cdk.Stack {
   constructor(scope: Construct, id: string, props?: cdk.StackProps) {
@@ -157,10 +175,10 @@ export class AppStack extends cdk.Stack {
         ADMIN_GROUP,
         APP_BASE_URL,
         ALLOWED_ORIGINS: ALLOWED_ORIGINS.join(','),
-        MONETIZATION_APP_ID,
-        MONETIZATION_ENDPOINT,
-        MONETIZATION_REGION,
-        MONETIZATION_ENFORCE,
+        // AWS Monetization — see .env.monetization at the repo root.
+        MONETIZATION_APP_ID: MONETIZATION_ENV.MONETIZATION_APP_ID ?? '',
+        MONETIZATION_ENDPOINT: MONETIZATION_ENV.MONETIZATION_ENDPOINT ?? '',
+        MONETIZATION_ENFORCE: MONETIZATION_ENV.MONETIZATION_ENFORCE ?? 'true',
       },
       bundling: {
         // Ship the judge/generation prompt files as inlined strings.
@@ -184,32 +202,18 @@ export class AppStack extends cdk.Stack {
       })
     );
 
-    // Runtime calls the AWS Monetization SDK makes from the handler: entitlement
-    // checks, usage metering, and minting the hosted pricing / billing-portal
-    // sessions. These are per-user runtime calls only — nothing here can create,
-    // publish or archive plans/metrics.
-    //
-    // `resources: ['*']` is deliberate for now: the service does not yet
-    // authorize on the app ARN, so an ARN-scoped resource is denied at runtime.
-    // Scope it to the live + `/sandbox` app ARNs once ARN-based authorization ships.
+    if (!MONETIZATION_ENV.MONETIZATION_APP_ID) {
+      cdk.Annotations.of(this).addWarning(
+        'MONETIZATION_APP_ID is not set in .env.monetization — entitlement and metering calls will fail (open) at runtime.'
+      );
+    }
+
     apiHandler.addToRolePolicy(
       new iam.PolicyStatement({
-        sid: 'MonetizationAIRuntime',
-        actions: [
-          'appmonetization:GetEntitlementDecision',
-          'appmonetization:PutEvent',
-          'appmonetization:PutAwsServiceEvent',
-          'appmonetization:ListPlans',
-          'appmonetization:CreateSubscriptionCheckoutSession',
-          'appmonetization:CreateOneTimeCheckoutSession',
-          'appmonetization:CreateBillingPortalSession',
-          'appmonetization:CancelSubscription',
-          'appmonetization:GetSubscription',
-        ],
+        actions: MONETIZATION_RUNTIME_ACTIONS,
         resources: ['*'],
       })
     );
-
 
     // --------------------------------------------------------------- HTTP API
 
@@ -249,10 +253,11 @@ export class AppStack extends cdk.Stack {
     api.addRoutes({ path: '/riddles/next', methods: [apigwv2.HttpMethod.GET], integration });
     api.addRoutes({ path: '/riddles/{id}/guess', methods: [apigwv2.HttpMethod.POST], integration });
     api.addRoutes({ path: '/riddles/{id}/hint', methods: [apigwv2.HttpMethod.POST], integration });
+    // Sessions for the MonetizationAI-hosted pricing page and billing portal.
+    api.addRoutes({ path: '/monetization/pricing-session', methods: [apigwv2.HttpMethod.POST], integration });
+    api.addRoutes({ path: '/monetization/billing-portal-session', methods: [apigwv2.HttpMethod.POST], integration });
     // Authenticated *and* gated on the `admins` group inside the handler.
     api.addRoutes({ path: '/admin/generate', methods: [apigwv2.HttpMethod.POST], integration });
-    // Billing (AWS Monetization): mints the hosted pricing/portal session URLs.
-    api.addRoutes({ path: '/billing/session', methods: [apigwv2.HttpMethod.GET], integration });
 
     // Steady-state ceiling with headroom above 300 TPS.
     const stage = api.defaultStage!.node.defaultChild as apigwv2.CfnStage;
@@ -404,6 +409,5 @@ export class AppStack extends cdk.Stack {
     new cdk.CfnOutput(this, 'UserPoolId', { value: userPool.userPoolId });
     new cdk.CfnOutput(this, 'UserPoolClientId', { value: userPoolClient.userPoolClientId });
     new cdk.CfnOutput(this, 'AnthropicSecretName', { value: ANTHROPIC_SECRET_NAME });
-    new cdk.CfnOutput(this, 'MonetizationAppId', { value: MONETIZATION_APP_ID });
   }
 }

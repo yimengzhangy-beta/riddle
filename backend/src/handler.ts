@@ -1,16 +1,22 @@
 import type { APIGatewayProxyEventV2WithJWTAuthorizer, APIGatewayProxyResultV2 } from 'aws-lambda';
 import { randomUUID } from 'crypto';
 import { ForbiddenError, UnauthorizedError, optionalUserId, playerOf, requireAdmin } from './auth';
-import { EntitlementDeniedError, meter, requireEntitlement } from './billing';
+import type { Player } from './engine/riddles';
 import { ConflictError, NotFoundError, ValidationError } from './engine/riddles';
-import type { GuessResult } from './engine/riddles';
 import { ModelOutputError } from './llm/client';
 import { logError, logResponse, stackFrames, withRequest } from './log';
+import type { BillableAction } from './monetization/billing';
+import {
+  NotEntitledError,
+  flushUsage,
+  recordUsage,
+  requireEntitlement,
+} from './monetization/billing';
 import * as adminRoutes from './routes/admin';
 import * as authRoutes from './routes/auth';
-import * as billingRoutes from './routes/billing';
 import { BadRequest } from './routes/input';
 import * as meRoutes from './routes/me';
+import * as monetizationRoutes from './routes/monetization';
 import type { RouteResult } from './routes/result';
 import * as riddleRoutes from './routes/riddles';
 
@@ -26,17 +32,19 @@ const ALLOWED_ORIGINS = (process.env.ALLOWED_ORIGINS ?? '')
   .filter(Boolean);
 
 /**
+ * Where a player denied by the entitlement gate is sent: the web app's root,
+ * which carries the "Upgrade" launcher for the hosted pricing page.
+ */
+const UPGRADE_URL = `${(process.env.APP_BASE_URL ?? '').replace(/\/+$/, '')}/`;
+
+/**
  * Echoes the caller's origin when it is on the list. An unknown origin gets the
  * first allowed one, which the browser then rejects — a mismatch is the correct
- * failure, and it keeps the header well-formed either way. Also the origin the
- * hosted billing pages return the player to (see routes/billing.ts).
+ * failure, and it keeps the header well-formed either way.
  */
-function allowedOrigin(origin: string | undefined): string {
-  return origin && ALLOWED_ORIGINS.includes(origin) ? origin : (ALLOWED_ORIGINS[0] ?? '');
-}
-
 function corsHeaders(origin: string | undefined): Record<string, string> {
-  const allowed = allowedOrigin(origin);
+  const allowed =
+    origin && ALLOWED_ORIGINS.includes(origin) ? origin : (ALLOWED_ORIGINS[0] ?? '');
   return {
     'Access-Control-Allow-Origin': allowed,
     'Access-Control-Allow-Headers': 'Content-Type,Authorization',
@@ -92,6 +100,22 @@ function riddleIdOf(event: APIGatewayProxyEventV2WithJWTAuthorizer): string {
   return decodeURIComponent(id);
 }
 
+/**
+ * Wraps a metered route. The entitlement gate runs before the work, so a denied
+ * request costs nothing; one usage event is recorded once the work succeeds, so
+ * a failed request is never charged.
+ */
+async function billable(
+  player: Player,
+  action: BillableAction,
+  run: () => Promise<RouteResult>
+): Promise<RouteResult> {
+  await requireEntitlement(player.userId, action);
+  const result = await run();
+  if (result.status < 300) await recordUsage(player.userId, action);
+  return result;
+}
+
 /** Matches "/riddles/{id}/guess" style patterns against the incoming path segments. */
 function match(segments: string[], pattern: string[]): boolean {
   if (segments.length !== pattern.length) return false;
@@ -123,39 +147,33 @@ async function route(event: APIGatewayProxyEventV2WithJWTAuthorizer): Promise<Ro
     return meRoutes.getProfile(playerOf(event));
   }
 
-  // Billable actions: check the player's plan BEFORE the paid work (a denied
-  // request costs nothing), and record one unit AFTER it succeeds — the route
-  // throws on failure, so a metered event always means the action happened.
+  // The three metered actions. See monetization/billing.ts.
   if (method === 'GET' && match(segments, ['riddles', 'next'])) {
     const player = playerOf(event);
-    await requireEntitlement(player.userId, 'riddle_played');
-    const result = await riddleRoutes.getNext(player, event.queryStringParameters ?? {});
-    await meter(player.userId, 'riddle_played');
-    return result;
+    return billable(player, 'play_riddle', () =>
+      riddleRoutes.getNext(player, event.queryStringParameters ?? {})
+    );
   }
 
   if (method === 'POST' && match(segments, ['riddles', ':', 'guess'])) {
     const player = playerOf(event);
-    // Gated on the AI-judged-guess quota, since the engine cannot know before the
-    // call whether a guess will need the model. An exact match is never metered.
-    await requireEntitlement(player.userId, 'guess_judged');
-    const result = await riddleRoutes.postGuess(player, riddleIdOf(event), parseBody(event));
-    if (!(result.body as GuessResult).exactMatch) await meter(player.userId, 'guess_judged');
-    return result;
+    return billable(player, 'submit_guess', () =>
+      riddleRoutes.postGuess(player, riddleIdOf(event), parseBody(event))
+    );
   }
 
   if (method === 'POST' && match(segments, ['riddles', ':', 'hint'])) {
     const player = playerOf(event);
-    await requireEntitlement(player.userId, 'hint_taken');
-    const result = await riddleRoutes.postHint(player, riddleIdOf(event));
-    await meter(player.userId, 'hint_taken');
-    return result;
+    return billable(player, 'take_hint', () => riddleRoutes.postHint(player, riddleIdOf(event)));
   }
 
-  // --------------------------------------------------------------- billing
-  if (method === 'GET' && match(segments, ['billing', 'session'])) {
-    const origin = allowedOrigin(event.headers?.origin ?? event.headers?.Origin);
-    return billingRoutes.getSession(playerOf(event), origin);
+  // ---------------------------------------------------------- monetization
+  if (method === 'POST' && match(segments, ['monetization', 'pricing-session'])) {
+    return monetizationRoutes.postPricingSession(playerOf(event));
+  }
+
+  if (method === 'POST' && match(segments, ['monetization', 'billing-portal-session'])) {
+    return monetizationRoutes.postBillingPortalSession(playerOf(event));
   }
 
   // ----------------------------------------------------------------- admin
@@ -177,19 +195,19 @@ function errorResult(err: unknown): RouteResult {
   if (err instanceof ForbiddenError) {
     return { status: 403, body: { error: err.message } };
   }
-  if (err instanceof EntitlementDeniedError) {
-    // Not entitled (no plan, or over quota). The SPA keys off decision:'DENY'
-    // and offers the hosted pricing page.
-    return {
-      status: 403,
-      body: { error: err.message, decision: 'DENY', reason: err.code, action: err.action },
-    };
-  }
   if (err instanceof NotFoundError) {
     return { status: 404, body: { error: err.message } };
   }
   if (err instanceof ConflictError) {
     return { status: 409, body: { error: err.message } };
+  }
+  if (err instanceof NotEntitledError) {
+    // The client reads `decision` (not the bare 403 — the app has other 403s) and
+    // sends the player to the pricing page.
+    return {
+      status: 403,
+      body: { error: err.message, decision: 'DENY', reason: err.reason, upgradeUrl: UPGRADE_URL },
+    };
   }
   if (err instanceof ModelOutputError) {
     return { status: 502, body: { error: `Model output could not be used: ${err.message}` } };
@@ -243,6 +261,9 @@ export async function handler(
     } catch (err) {
       result = errorResult(err);
     }
+
+    // Buffered usage events must leave before Lambda freezes the environment.
+    await flushUsage();
 
     logResponse(result.status);
     return respond(result.status, result.body, event.headers?.origin ?? event.headers?.Origin);
