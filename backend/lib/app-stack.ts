@@ -39,14 +39,17 @@ const LOG_RETENTION = logs.RetentionDays.THREE_MONTHS;
  *
  *   APP_BASE_URL=https://main.xxxx.amplifyapp.com npx cdk deploy
  */
-const APP_BASE_URL = process.env.APP_BASE_URL ?? 'https://main.d2v99bb7j5etb9.amplifyapp.com';
+const APP_BASE_URL = process.env.APP_BASE_URL ?? 'https://live.dryqiojss602m.amplifyapp.com';
+
+/** The earlier Amplify app, kept as an allowed origin while it is still used for testing. */
+const SANDBOX_TEST_URL = 'https://main.d2v99bb7j5etb9.amplifyapp.com';
 
 /**
- * Browser origins allowed to call this API. The deployed site and local dev —
+ * Browser origins allowed to call this API. The deployed sites and local dev —
  * nothing else. Both the HTTP API's preflight and the handler's own
  * Access-Control-Allow-Origin are driven from this one list.
  */
-const ALLOWED_ORIGINS = [APP_BASE_URL, 'http://localhost:5173'];
+const ALLOWED_ORIGINS = [APP_BASE_URL, SANDBOX_TEST_URL, 'http://localhost:5173'];
 
 /**
  * AWS Monetization: app identity, control-plane endpoint and the enforcement
