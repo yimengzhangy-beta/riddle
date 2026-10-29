@@ -45,10 +45,18 @@ To rotate: `aws secretsmanager put-secret-value --secret-id <name> --secret-stri
 cd backend
 npm install
 npx cdk bootstrap aws://136311627418/us-east-1   # one time per account/region
-npx cdk deploy
+npx cdk deploy --all
 ```
 
-The outputs print **ApiUrl**, **UserPoolId** and **UserPoolClientId**.
+There are two environments, defined once in `lib/app-stack.ts` and instantiated in
+`bin/app.ts`: **`RiddleStack`** (live) and **`RiddleSandboxStack`**. Each has its own
+API, DynamoDB table, Cognito user pool and Lambda. The only monetization difference is
+the identity the Lambda signs with: the live app ARN from `.env.monetization`, or that
+ARN with `/sandbox` appended. Deploy one with `npx cdk deploy RiddleSandboxStack`.
+
+The outputs print **ApiUrl**, **UserPoolId** and **UserPoolClientId** per stack. The
+frontend reads them as `VITE_API_URL`, `VITE_COGNITO_USER_POOL_ID` and
+`VITE_COGNITO_CLIENT_ID` (set per Amplify app; the live values are the defaults).
 Test it: `curl <ApiUrl>/health`
 
 ## 3. Make yourself an admin
