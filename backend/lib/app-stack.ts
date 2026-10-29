@@ -22,44 +22,47 @@ const ANTHROPIC_SECRET_NAME = 'cofounder/anthropic-api-key';
 /** Members of this Cognito group may call POST /admin/*. */
 const ADMIN_GROUP = 'admins';
 
-/**
- * Fixed so the log group is `/aws/lambda/riddle-api` rather than a generated
- * name that changes whenever the construct is replaced.
- */
-const FUNCTION_NAME = 'riddle-api';
-
 /** 90 days, for both the Lambda audit log and the API Gateway access log. */
 const LOG_RETENTION = logs.RetentionDays.THREE_MONTHS;
 
 /**
- * Where the web app is served from — the browser origin CORS must allow. This is
- * the Amplify URL, not the API's: the Lambda cannot infer it from a request,
- * because its own origin is API Gateway. Override at synth time once the
- * frontend has a domain:
- *
- *   APP_BASE_URL=https://main.xxxx.amplifyapp.com npx cdk deploy
+ * One deployable environment. The app is instantiated twice from bin/app.ts —
+ * `RiddleStack` (live) and `RiddleSandboxStack` — each with its own API, table,
+ * user pool and Lambda, so test accounts, test subscriptions and test money never
+ * touch live data. Everything that differs between the two is a prop here.
  */
-const APP_BASE_URL = process.env.APP_BASE_URL ?? 'https://live.dryqiojss602m.amplifyapp.com';
-
-/** The earlier Amplify app, kept as an allowed origin while it is still used for testing. */
-const SANDBOX_TEST_URL = 'https://main.d2v99bb7j5etb9.amplifyapp.com';
+export interface AppStackProps extends cdk.StackProps {
+  /**
+   * Fixed Lambda name, so the log group is `/aws/lambda/<functionName>` rather
+   * than a generated name that changes whenever the construct is replaced.
+   */
+  functionName: string;
+  /**
+   * Where this environment's web app is served from — the Amplify URL, not the
+   * API's. The hosted billing pages send players back here.
+   */
+  appBaseUrl: string;
+  /**
+   * Browser origins allowed to call this API: this environment's site and local
+   * dev, nothing else. Drives both the HTTP API preflight and the handler's own
+   * Access-Control-Allow-Origin header.
+   */
+  allowedOrigins: string[];
+  /** The AWS Monetization identity this Lambda signs with: the live ARN, or the live ARN + `/sandbox`. */
+  monetizationAppId: string;
+  monetizationEndpoint: string;
+  monetizationEnforce: string;
+  /** Prefix of the saved Logs Insights queries, which share one namespace per account. */
+  queryPrefix: string;
+}
 
 /**
- * Browser origins allowed to call this API. The deployed sites and local dev —
- * nothing else. Both the HTTP API's preflight and the handler's own
- * Access-Control-Allow-Origin are driven from this one list.
+ * AWS Monetization settings, read at synth time from the committed repo-root
+ * `.env.monetization` (no secrets in it). bin/app.ts derives each stack's
+ * identity from `MONETIZATION_APP_ID`: the live ARN as written, or with
+ * `/sandbox` appended for the sandbox stack.
  */
-const ALLOWED_ORIGINS = [APP_BASE_URL, SANDBOX_TEST_URL, 'http://localhost:5173'];
-
-/**
- * AWS Monetization: app identity, control-plane endpoint and the enforcement
- * flag, read at synth time from the committed repo-root `.env.monetization` (no
- * secrets in it). `MONETIZATION_APP_ID` is the sandbox ARN while testing and the
- * live ARN once published — swap the active line in that file and redeploy.
- */
-const MONETIZATION_ENV = readMonetizationEnv();
-
-function readMonetizationEnv(): Record<string, string> {
+export function readMonetizationEnv(): Record<string, string> {
   const file = path.resolve(__dirname, '..', '..', '.env.monetization');
   const out: Record<string, string> = {};
   if (!fs.existsSync(file)) return out;
@@ -88,8 +91,10 @@ const MONETIZATION_RUNTIME_ACTIONS = [
 ];
 
 export class AppStack extends cdk.Stack {
-  constructor(scope: Construct, id: string, props?: cdk.StackProps) {
+  constructor(scope: Construct, id: string, props: AppStackProps) {
     super(scope, id, props);
+
+    const { functionName, appBaseUrl, allowedOrigins, queryPrefix } = props;
 
     // ---------------------------------------------------------------- Cognito
 
@@ -152,13 +157,13 @@ export class AppStack extends cdk.Stack {
     // Owned by the stack rather than auto-created by Lambda, which is the only way
     // to put a retention policy on it. Holds the structured audit events.
     const handlerLogGroup = new logs.LogGroup(this, 'ApiHandlerLogGroup', {
-      logGroupName: `/aws/lambda/${FUNCTION_NAME}`,
+      logGroupName: `/aws/lambda/${functionName}`,
       retention: LOG_RETENTION,
       removalPolicy: cdk.RemovalPolicy.DESTROY, // dev convenience; switch to RETAIN for production
     });
 
     const apiHandler = new NodejsFunction(this, 'ApiHandler', {
-      functionName: FUNCTION_NAME,
+      functionName,
       logGroup: handlerLogGroup,
       entry: 'src/handler.ts',
       handler: 'handler',
@@ -176,12 +181,12 @@ export class AppStack extends cdk.Stack {
         USER_POOL_ID: userPool.userPoolId,
         USER_POOL_CLIENT_ID: userPoolClient.userPoolClientId,
         ADMIN_GROUP,
-        APP_BASE_URL,
-        ALLOWED_ORIGINS: ALLOWED_ORIGINS.join(','),
-        // AWS Monetization — see .env.monetization at the repo root.
-        MONETIZATION_APP_ID: MONETIZATION_ENV.MONETIZATION_APP_ID ?? '',
-        MONETIZATION_ENDPOINT: MONETIZATION_ENV.MONETIZATION_ENDPOINT ?? '',
-        MONETIZATION_ENFORCE: MONETIZATION_ENV.MONETIZATION_ENFORCE ?? 'true',
+        APP_BASE_URL: appBaseUrl,
+        ALLOWED_ORIGINS: allowedOrigins.join(','),
+        // AWS Monetization — see .env.monetization at the repo root and bin/app.ts.
+        MONETIZATION_APP_ID: props.monetizationAppId,
+        MONETIZATION_ENDPOINT: props.monetizationEndpoint,
+        MONETIZATION_ENFORCE: props.monetizationEnforce,
       },
       bundling: {
         // Ship the judge/generation prompt files as inlined strings.
@@ -205,7 +210,7 @@ export class AppStack extends cdk.Stack {
       })
     );
 
-    if (!MONETIZATION_ENV.MONETIZATION_APP_ID) {
+    if (!props.monetizationAppId) {
       cdk.Annotations.of(this).addWarning(
         'MONETIZATION_APP_ID is not set in .env.monetization — entitlement and metering calls will fail (open) at runtime.'
       );
@@ -238,7 +243,7 @@ export class AppStack extends cdk.Stack {
     const api = new apigwv2.HttpApi(this, 'Api', {
       defaultAuthorizer: authorizer, // every route below is protected unless it opts out
       corsPreflight: {
-        allowOrigins: ALLOWED_ORIGINS,
+        allowOrigins: allowedOrigins,
         allowMethods: [apigwv2.CorsHttpMethod.ANY],
         allowHeaders: ['Content-Type', 'Authorization'],
       },
@@ -277,7 +282,7 @@ export class AppStack extends cdk.Stack {
      * Fields are metadata only — no request body, no query string.
      */
     const accessLogGroup = new logs.LogGroup(this, 'ApiAccessLogGroup', {
-      logGroupName: `/aws/apigateway/${FUNCTION_NAME}-access`,
+      logGroupName: `/aws/apigateway/${functionName}-access`,
       retention: LOG_RETENTION,
       removalPolicy: cdk.RemovalPolicy.DESTROY, // dev convenience; switch to RETAIN for production
     });
@@ -309,7 +314,7 @@ export class AppStack extends cdk.Stack {
 
     const savedQuery = (id: string, name: string, logGroupNames: string[], queryString: string) =>
       new logs.CfnQueryDefinition(this, id, {
-        name: `riddle/${name}`,
+        name: `${queryPrefix}/${name}`,
         logGroupNames,
         queryString,
       });

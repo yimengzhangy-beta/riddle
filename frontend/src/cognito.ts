@@ -12,9 +12,16 @@
  * account UNCONFIRMED and unable to log in.
  */
 
-const REGION = 'us-east-1';
-const CLIENT_ID = '6hp0qhka9tk297itheulbl6h7';
-const USER_POOL_ID = 'us-east-1_TYIXhSmMv';
+/**
+ * Which user pool this build signs into. Set per Amplify app, so the same code
+ * serves the live site (defaults below) and the sandbox site (its own pool):
+ *
+ *   VITE_COGNITO_REGION, VITE_COGNITO_USER_POOL_ID, VITE_COGNITO_CLIENT_ID
+ */
+const VITE = import.meta.env as Record<string, string | undefined>;
+const REGION = VITE.VITE_COGNITO_REGION ?? 'us-east-1';
+const CLIENT_ID = VITE.VITE_COGNITO_CLIENT_ID ?? '6hp0qhka9tk297itheulbl6h7';
+const USER_POOL_ID = VITE.VITE_COGNITO_USER_POOL_ID ?? 'us-east-1_TYIXhSmMv';
 const IDP = `https://cognito-idp.${REGION}.amazonaws.com/`;
 
 const RAW_API = (import.meta.env.VITE_API_URL as string | undefined) ?? '';
