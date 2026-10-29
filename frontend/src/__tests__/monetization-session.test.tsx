@@ -19,46 +19,52 @@ vi.mock('../api', () => ({
 import { mintBillingPortalSession, mintPricingSession } from '../api';
 import {
   clearMonetizationSessionCookies,
-  setMonetizationSessionCookies,
+  refreshBillingPortalSession,
+  refreshPricingSession,
 } from '../monetization';
 
-function cookie(name: string): string | null {
-  const hit = document.cookie.split('; ').find((c) => c.startsWith(`${name}=`));
-  return hit ? decodeURIComponent(hit.slice(name.length + 1)) : null;
+function plantStaleCookie(name: string) {
+  document.cookie = `${name}=${encodeURIComponent('https://host/pricing#token=stale')}; Max-Age=3600; Path=/; Secure; SameSite=Strict`;
+  document.cookie = `${name}_expires_at=${EXPIRES}; Max-Age=3600; Path=/; Secure; SameSite=Strict`;
 }
 
-describe('setMonetizationSessionCookies (the login hook)', () => {
+describe('hosted-session launchers (mint on every click, cache nothing)', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     signedIn.mockReturnValue(true);
     clearMonetizationSessionCookies();
   });
 
-  it('mints both hosted sessions and stores both URLs with their expiry', async () => {
-    await setMonetizationSessionCookies();
+  it('mints a fresh pricing session through the API and returns it to the launcher', async () => {
+    const session = await refreshPricingSession();
 
     expect(mintPricingSession).toHaveBeenCalledTimes(1);
-    expect(mintBillingPortalSession).toHaveBeenCalledTimes(1);
+    expect(session).toEqual({ url: PRICING_URL, expiresAt: EXPIRES });
+    expect(document.cookie).not.toContain('mai_'); // nothing cached for a later click
+  });
 
-    expect(cookie('mai_pricing_url')).toBe(PRICING_URL);
-    expect(cookie('mai_billing_portal_url')).toBe(PORTAL_URL);
-    expect(cookie('mai_pricing_url_expires_at')).toBe(EXPIRES);
-    expect(cookie('mai_billing_portal_url_expires_at')).toBe(EXPIRES);
+  it('mints a fresh billing-portal session the same way', async () => {
+    const session = await refreshBillingPortalSession();
+
+    expect(mintBillingPortalSession).toHaveBeenCalledTimes(1);
+    expect(session).toEqual({ url: PORTAL_URL, expiresAt: EXPIRES });
+    expect(document.cookie).not.toContain('mai_');
+  });
+
+  it('discards a stale cached URL from an earlier identity before minting', async () => {
+    plantStaleCookie('mai_pricing_url');
+
+    await refreshPricingSession();
+
+    expect(document.cookie).not.toContain('token=stale');
   });
 
   it('throws and mints nothing when signed out', async () => {
     signedIn.mockReturnValue(false);
 
-    await expect(setMonetizationSessionCookies()).rejects.toThrow();
+    await expect(refreshPricingSession()).rejects.toThrow();
+    await expect(refreshBillingPortalSession()).rejects.toThrow();
     expect(mintPricingSession).not.toHaveBeenCalled();
     expect(mintBillingPortalSession).not.toHaveBeenCalled();
-    expect(cookie('mai_pricing_url')).toBeNull();
-  });
-
-  it('clears every cookie on sign-out', async () => {
-    await setMonetizationSessionCookies();
-    clearMonetizationSessionCookies();
-
-    expect(document.cookie).not.toContain('mai_');
   });
 });

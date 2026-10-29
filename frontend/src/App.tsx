@@ -7,7 +7,6 @@ import {
   clearMonetizationSessionCookies,
   refreshBillingPortalSession,
   refreshPricingSession,
-  setMonetizationSessionCookies,
 } from './monetization';
 import Auth from './pages/Auth';
 import Play from './pages/Play';
@@ -22,12 +21,11 @@ interface Stats {
 const PUBLIC_PATHS: string[] = [];
 
 /**
- * Login hook: pre-mint the hosted pricing and billing-portal sessions so the
- * launchers open instantly. Never blocks sign-in — if it fails, a launcher simply
- * mints on click instead.
+ * Sign-in hook: drop any hosted-session cookie left by an earlier build. The
+ * launchers mint a fresh session on every click (see monetization.ts).
  */
 function primeMonetization(): void {
-  void setMonetizationSessionCookies().catch(() => {});
+  clearMonetizationSessionCookies();
 }
 
 export default function App() {
