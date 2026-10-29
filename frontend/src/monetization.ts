@@ -13,6 +13,16 @@ import { isSignedIn } from './cognito';
  * sets the cookies itself, right after sign-in.
  */
 
+/**
+ * Where the hosted pages are served from. The service mints them on the regional
+ * origin of the app's control plane (us-east-2), which this SDK build's built-in
+ * trust list does not yet include, so every launcher is handed this list — a URL
+ * on any other origin is refused rather than opened.
+ */
+export const MONETIZATION_HOSTED_ORIGINS: readonly string[] = [
+  'https://us-east-2.appmonetization.aws.com',
+];
+
 const PRICING_COOKIE = 'mai_pricing_url';
 const PORTAL_COOKIE = 'mai_billing_portal_url';
 

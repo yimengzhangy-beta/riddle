@@ -11,7 +11,7 @@ import {
   submitGuess,
   takeHint,
 } from '../api';
-import { refreshPricingSession } from '../monetization';
+import { MONETIZATION_HOSTED_ORIGINS, refreshPricingSession } from '../monetization';
 import { navigate } from '../router';
 
 const DIFFICULTIES: Difficulty[] = ['easy', 'medium', 'hard'];
@@ -302,7 +302,11 @@ function Denied({ copy }: { copy: string }) {
   return (
     <div className="notice" style={{ marginTop: '1rem' }}>
       {copy}{' '}
-      <ManagePlan variant="link" onCreatePricingSession={refreshPricingSession}>
+      <ManagePlan
+        variant="link"
+        onCreatePricingSession={refreshPricingSession}
+        trustedOrigins={MONETIZATION_HOSTED_ORIGINS}
+      >
         See plans
       </ManagePlan>
     </div>

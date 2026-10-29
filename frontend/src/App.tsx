@@ -3,6 +3,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { getMe } from './api';
 import { isSignedIn, signOut } from './cognito';
 import {
+  MONETIZATION_HOSTED_ORIGINS,
   clearMonetizationSessionCookies,
   refreshBillingPortalSession,
   refreshPricingSession,
@@ -149,13 +150,18 @@ function Header({
           {signedIn && (
             <>
               {/* Hosted pricing page: plans, checkout, upgrades. */}
-              <ManagePlan variant="link" onCreatePricingSession={refreshPricingSession}>
+              <ManagePlan
+                variant="link"
+                onCreatePricingSession={refreshPricingSession}
+                trustedOrigins={MONETIZATION_HOSTED_ORIGINS}
+              >
                 Upgrade
               </ManagePlan>
               {/* Hosted billing portal: current plan, usage, invoices, cancel. */}
               <ManageSubscription
                 variant="link"
                 onCreateBillingPortalSession={refreshBillingPortalSession}
+                trustedOrigins={MONETIZATION_HOSTED_ORIGINS}
               >
                 Manage subscription
               </ManageSubscription>
