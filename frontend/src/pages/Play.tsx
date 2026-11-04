@@ -1,4 +1,5 @@
 import { ManagePlan } from '@aws-app-monetization/sdk/react';
+import Button, { type ButtonProps } from '@cloudscape-design/components/button';
 import { useEffect, useRef, useState } from 'react';
 import {
   ApiError,
@@ -223,13 +224,14 @@ export default function Play({ onStats }: Props) {
           spellCheck={false}
           aria-label="Your answer"
         />
-        <button
-          className="btn btn--primary"
-          onClick={() => void send()}
+        <Button
+          variant="primary"
+          loading={busy}
           disabled={busy || guess.trim() === ''}
+          onClick={() => void send()}
         >
-          {busy ? <span className="spinner" /> : 'Guess'}
-        </button>
+          Guess
+        </Button>
       </div>
 
       {verdict && <Verdict result={verdict} />}
@@ -252,18 +254,18 @@ export default function Play({ onStats }: Props) {
       )}
 
       <div className="btn-row">
-        <button
-          className="btn btn--quiet"
-          onClick={() => setConfirmHint(true)}
+        <Button
+          variant="normal"
           disabled={busy || riddle.hintsAvailable === 0}
+          onClick={() => setConfirmHint(true)}
         >
           {riddle.hintsAvailable === 0
             ? 'No hints left'
             : `Hint · −${HINT_PENALTY} pts · ${riddle.hintsAvailable} left`}
-        </button>
-        <button className="btn btn--text" onClick={() => setPhase({ kind: 'picking' })}>
+        </Button>
+        <Button variant="inline-link" onClick={() => setPhase({ kind: 'picking' })}>
           Skip
-        </button>
+        </Button>
       </div>
 
       {confirmHint && (
@@ -281,12 +283,14 @@ export default function Play({ onStats }: Props) {
               {riddle.hintsAvailable === 1 ? '' : 's'} left on it.
             </p>
             <div style={{ display: 'flex', gap: '0.5rem', marginTop: '1.25rem' }}>
-              <button className="btn btn--primary" style={{ flex: 1 }} onClick={() => void useHint()}>
-                Use hint
-              </button>
-              <button className="btn btn--quiet" onClick={() => setConfirmHint(false)}>
+              <div style={{ flex: 1 }}>
+                <Button variant="primary" fullWidth onClick={() => void useHint()}>
+                  Use hint
+                </Button>
+              </div>
+              <Button variant="normal" onClick={() => setConfirmHint(false)}>
                 Not yet
-              </button>
+              </Button>
             </div>
           </div>
         </div>
@@ -327,6 +331,9 @@ function Verdict({ result }: { result: GuessResult }) {
 
 function Solved({ result, onNext }: { result: GuessResult; onNext: () => void }) {
   const [shown, setShown] = useState(0);
+  // Focus the one action on the page so Enter moves straight on to the next riddle.
+  const nextRef = useRef<ButtonProps.Ref>(null);
+  useEffect(() => nextRef.current?.focus(), []);
 
   // Count the points up rather than snapping — the one moment worth savouring.
   useEffect(() => {
@@ -357,14 +364,11 @@ function Solved({ result, onNext }: { result: GuessResult; onNext: () => void })
             ? `${result.streak}-day streak · ${result.score} points total`
             : `${result.score} points total`}
         </p>
-        <button
-          className="btn btn--primary"
-          style={{ marginTop: '2rem', minWidth: '12rem' }}
-          onClick={onNext}
-          autoFocus
-        >
-          Next riddle
-        </button>
+        <div style={{ marginTop: '2rem' }}>
+          <Button variant="primary" ref={nextRef} onClick={onNext}>
+            Next riddle
+          </Button>
+        </div>
       </div>
     </div>
   );

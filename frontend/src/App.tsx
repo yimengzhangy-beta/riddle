@@ -1,4 +1,5 @@
 import { ManagePlan, ManageSubscription } from '@aws-app-monetization/sdk/react';
+import Button from '@cloudscape-design/components/button';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { getMe } from './api';
 import { isSignedIn, signOut } from './cognito';
@@ -141,9 +142,11 @@ function Header({
 
         <nav className="nav">
           {signedIn && (
-            <a href="/" onClick={go('/')} data-active={path === '/'}>
-              Play
-            </a>
+            <span data-active={path === '/'}>
+              <Button variant="link" onClick={() => navigate('/')}>
+                Play
+              </Button>
+            </span>
           )}
           {signedIn && (
             <>
@@ -163,15 +166,9 @@ function Header({
               >
                 Manage subscription
               </ManageSubscription>
-              <a
-                href="/"
-                onClick={(e) => {
-                  e.preventDefault();
-                  onSignOut();
-                }}
-              >
+              <Button variant="link" onClick={onSignOut}>
                 Sign out
-              </a>
+              </Button>
             </>
           )}
         </nav>

@@ -1,3 +1,4 @@
+import Button from '@cloudscape-design/components/button';
 import { useState } from 'react';
 import { AuthError, PASSWORD_RULES, signIn, signUp } from '../cognito';
 
@@ -83,28 +84,30 @@ export default function Auth({ onDone }: { onDone: () => void }) {
 
           {error && <p className="error-text">{error}</p>}
 
-          <button
-            className="btn btn--primary btn--block"
-            style={{ marginTop: '1.25rem' }}
-            onClick={() => void submit()}
-            disabled={!canSubmit}
-          >
-            {busy ? <span className="spinner" /> : signingUp ? 'Create account' : 'Sign in'}
-          </button>
+          <div style={{ marginTop: '1.25rem' }}>
+            <Button
+              variant="primary"
+              fullWidth
+              loading={busy}
+              disabled={!canSubmit}
+              onClick={() => void submit()}
+            >
+              {signingUp ? 'Create account' : 'Sign in'}
+            </Button>
+          </div>
         </div>
 
         <p className="center small muted" style={{ marginTop: '1.25rem' }}>
           {signingUp ? 'Already have an account?' : 'New here?'}{' '}
-          <button
-            className="btn btn--text"
-            style={{ fontWeight: 600 }}
+          <Button
+            variant="inline-link"
             onClick={() => {
               setMode(signingUp ? 'in' : 'up');
               setError(null);
             }}
           >
             {signingUp ? 'Sign in' : 'Make one'}
-          </button>
+          </Button>
         </p>
       </div>
     </div>

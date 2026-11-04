@@ -261,59 +261,6 @@ input:focus {
 
 /* ---------------------------------------------------------------- button */
 
-.btn {
-  font: inherit;
-  font-size: 0.9375rem;
-  font-weight: 500;
-  border-radius: 10px;
-  padding: 0.75rem 1.25rem;
-  border: 1px solid transparent;
-  cursor: pointer;
-  transition: background 140ms ease, border-color 140ms ease, opacity 140ms ease;
-  min-height: 2.75rem; /* comfortable tap target */
-}
-
-.btn:disabled {
-  opacity: 0.5;
-  cursor: default;
-}
-
-.btn--primary {
-  background: var(--accent);
-  color: #fff;
-}
-
-.btn--primary:hover:not(:disabled) {
-  background: #8c4222;
-}
-
-.btn--quiet {
-  background: transparent;
-  color: var(--ink-soft);
-  border-color: var(--line);
-}
-
-.btn--quiet:hover:not(:disabled) {
-  border-color: var(--muted);
-  color: var(--ink);
-}
-
-.btn--text {
-  background: none;
-  border: none;
-  color: var(--muted);
-  padding: 0.5rem;
-  min-height: auto;
-}
-
-.btn--text:hover:not(:disabled) {
-  color: var(--ink);
-}
-
-.btn--block {
-  width: 100%;
-}
-
 .btn-row {
   display: flex;
   gap: 0.5rem;
