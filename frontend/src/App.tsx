@@ -59,12 +59,22 @@ export default function App() {
 
   const needsAuth = !PUBLIC_PATHS.includes(path);
 
+  // "Play" in the nav restarts the game: remounting <Play> drops any riddle in
+  // progress and shows the difficulty picker again. Without this, the button was
+  // a no-op whenever the player was already on the only page.
+  const [playKey, setPlayKey] = useState(0);
+  function restartPlay() {
+    navigate('/');
+    setPlayKey((k) => k + 1);
+  }
+
   return (
     <div className="shell">
       <Header
         signedIn={signedIn}
         stats={stats}
         path={path}
+        onPlay={restartPlay}
         onSignOut={leave}
       />
       <main>
@@ -76,7 +86,7 @@ export default function App() {
             }}
           />
         ) : (
-          <Play onStats={setStats} />
+          <Play key={playKey} onStats={setStats} />
         )}
       </main>
     </div>
@@ -87,11 +97,13 @@ function Header({
   signedIn,
   stats,
   path,
+  onPlay,
   onSignOut,
 }: {
   signedIn: boolean;
   stats: Stats | null;
   path: string;
+  onPlay: () => void;
   onSignOut: () => void;
 }) {
   // Nudge the score when it changes, so points landing in the header is felt.
@@ -143,7 +155,7 @@ function Header({
         <nav className="nav">
           {signedIn && (
             <span data-active={path === '/'}>
-              <Button variant="link" onClick={() => navigate('/')}>
+              <Button variant="link" onClick={onPlay}>
                 Play
               </Button>
             </span>
